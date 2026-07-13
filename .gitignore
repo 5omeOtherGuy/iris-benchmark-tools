@@ -1,0 +1,36 @@
+# /mnt/bench/work -- benchmark tooling repo.
+#
+# FAIL-SAFE POLICY: ignore EVERYTHING, then explicitly allow only the tooling
+# files. New files (data dirs, credentials, downloaded assets) are ignored by
+# default, so nothing sensitive can be tracked by accident. To track a new
+# tooling file, add an explicit `!` allow-rule below AND confirm it holds no
+# secrets or trial data.
+
+/*
+
+# --- explicitly tracked tooling (safe to push) ---
+!.gitignore
+!CLAUDE.md
+!README.md
+!run-bench.sh
+!analyze_tokens.py
+!agents
+!fixtures
+
+# --- junk inside allowed dirs ---
+**/__pycache__/
+*.pyc
+*.bak
+
+# NEVER TRACKED (already covered by `/*`, listed for intent + defense in depth):
+#   secrets.env            -- live Claude Code OAuth token
+#   *.credentials.json      -- Claude Code credentials
+#   auth.json               -- iris auth store
+#   jobs/                   -- trial data (may embed uploaded creds / token
+#                              fragments in logs + agent transcripts; also huge)
+#   assets/                 -- large iris binaries / tarballs (regenerable)
+secrets.env
+*.credentials.json
+auth.json
+jobs/
+assets/

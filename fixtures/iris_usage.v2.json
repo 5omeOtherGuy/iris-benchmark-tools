@@ -1,0 +1,58 @@
+{
+  "schema_version": 2,
+  "provider": "anthropic",
+  "model": "claude-sonnet-5",
+  "base": {
+    "system_prompt_tokens": 6000,
+    "tools": [
+      {"name": "read", "schema_tokens": 300},
+      {"name": "bash", "schema_tokens": 700}
+    ],
+    "tools_total_tokens": 1000,
+    "base_total_tokens": 7000
+  },
+  "turns": [
+    {
+      "i": 1,
+      "fresh": 100,
+      "cache_read": 6500,
+      "cache_write": 500,
+      "cache_5m": 500,
+      "cache_1h": 0,
+      "output": 200,
+      "reasoning": 20,
+      "input_full": 7100,
+      "duration_ms": 1200,
+      "ttft_ms": 300,
+      "stop_reason": "tool_use"
+    },
+    {
+      "i": 2,
+      "fresh": 200,
+      "cache_read": 7000,
+      "cache_write": 400,
+      "cache_5m": 400,
+      "cache_1h": 0,
+      "output": 300,
+      "reasoning": 30,
+      "input_full": 7600,
+      "duration_ms": 1400,
+      "ttft_ms": 350,
+      "stop_reason": "end_turn"
+    }
+  ],
+  "tools": [
+    {"i": 1, "turn": 1, "name": "read", "call_id": "call-1", "duration_ms": 50, "offloaded": false, "handle_bytes": 0, "handle_lines": 0},
+    {"i": 2, "turn": 1, "name": "bash", "call_id": "call-2", "duration_ms": 75, "offloaded": true, "handle_bytes": 10000, "handle_lines": 200}
+  ],
+  "totals": {
+    "provider_turns": 2,
+    "fresh": 300,
+    "cache_read": 13500,
+    "cache_write": 900,
+    "output": 500,
+    "reasoning": 50,
+    "input_full": 14700,
+    "tool_calls": 2
+  }
+}
