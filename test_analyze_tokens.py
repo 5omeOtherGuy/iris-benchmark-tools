@@ -354,8 +354,11 @@ class TokenAnalyzerEndToEndTests(unittest.TestCase):
         first_iris = next(a for a in data["attempts"] if a["trial"] == "shared__i1")
         self.assertEqual(first_iris["metrics"]["totals"]["input_full"], 250)
         self.assertEqual(first_iris["metrics"]["totals"]["input_beyond_base"], 50)
-        self.assertAlmostEqual(first_iris["metrics"]["totals"]["cost_actual"], 0.000744)
-        self.assertAlmostEqual(first_iris["metrics"]["totals"]["cost_cold"], 0.00102)
+        # Sonnet-5 intro rates: fresh 30*$2 + read 180*$0.20 + write 40*$2.50 +
+        # output 15*$10 = $0.000346; cold re-prices turn-0 read (80) at write rate:
+        # +80*($2.50-$0.20) = +$0.000184 -> $0.000530.
+        self.assertAlmostEqual(first_iris["metrics"]["totals"]["cost_actual"], 0.000346)
+        self.assertAlmostEqual(first_iris["metrics"]["totals"]["cost_cold"], 0.000530)
 
         warnings = "\n".join(data["warnings"])
         self.assertIn("legacy iris usage report", warnings)

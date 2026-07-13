@@ -21,18 +21,21 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
-# VERIFY/UPDATE as of 2026-07-13. Rates are USD per million tokens.
-# cache_write/cache_read intentionally derive from input so editing one input
-# rate preserves the requested 1.25x/0.10x relationship.
+# Rates are USD per million tokens. Verified against platform.claude.com/docs
+# pricing on 2026-07-14. cache_write is the 5m rate (1.25x input); iris/cc both
+# use 5m ephemeral caching by default (confirmed cache_creation_1h == 0 in runs).
+# cache_read = 0.10x input.
+#
+# Claude Sonnet 5 has INTRODUCTORY pricing ($2/$10) through 2026-08-31, then
+# STANDARD ($3/$15) from 2026-09-01. The active table below is the intro rates,
+# correct for all runs to date; flip to the standard block for runs on/after
+# 2026-09-01 (or make this date-aware if a re-run straddles the transition).
+_SONNET5_INTRO = {"input": 2.00, "output": 10.00, "cache_write": 2.00 * 1.25, "cache_read": 2.00 * 0.10}
+_SONNET5_STANDARD = {"input": 3.00, "output": 15.00, "cache_write": 3.00 * 1.25, "cache_read": 3.00 * 0.10}
 PRICING = {
-    "claude-sonnet-5": {
-        "input": 3.00,
-        "output": 30.00,
-        "cache_write": 3.00 * 1.25,
-        "cache_read": 3.00 * 0.10,
-    }
+    "claude-sonnet-5": _SONNET5_INTRO,
 }
-PRICING_AS_OF = "2026-07-13 (VERIFY/UPDATE)"
+PRICING_AS_OF = "2026-07-14 (Sonnet 5 intro rates, valid through 2026-08-31)"
 HIGH_VARIANCE_CV = 0.20
 
 Number = int | float
