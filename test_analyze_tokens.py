@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 
 import json
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -136,6 +138,176 @@ class TokenAnalyzerTests(unittest.TestCase):
         self.assertEqual(stats["min"], 1)
         self.assertEqual(stats["max"], 4)
         self.assertAlmostEqual(stats["stdev"], 1.2909944487358056)
+
+
+class TokenAnalyzerEndToEndTests(unittest.TestCase):
+    @staticmethod
+    def write_result(trial, task, reward, exception=None):
+        result = {"task_name": task, "exception_info": exception}
+        if reward is not None:
+            result["verifier_result"] = {"rewards": {"reward": reward}}
+        (trial / "result.json").write_text(json.dumps(result))
+
+    @staticmethod
+    def write_iris_trial(job, task, suffix, reward, turns=None, legacy=False, exception=None, log=None):
+        trial = job / f"{task}__{suffix}"
+        agent = trial / "agent"
+        agent.mkdir(parents=True)
+        TokenAnalyzerEndToEndTests.write_result(trial, task, reward, exception)
+        if log:
+            (trial / "trial.log").write_text(log)
+        if legacy:
+            usage = {
+                "provider": "anthropic",
+                "model": "claude-sonnet-5",
+                "provider_turns": 1,
+                "input_tokens": 100,
+                "output_tokens": 10,
+                "cache_read_input_tokens": 80,
+                "cache_write_input_tokens": 10,
+                "tool_calls": 1,
+            }
+        else:
+            turns = turns or [(10, 80, 10, 5), (20, 100, 30, 10)]
+            normalized = []
+            for index, (fresh, read, write, output) in enumerate(turns, 1):
+                normalized.append({
+                    "i": index,
+                    "fresh": fresh,
+                    "cache_read": read,
+                    "cache_write": write,
+                    "output": output,
+                    "reasoning": 0,
+                    "input_full": fresh + read + write,
+                    "duration_ms": 100,
+                    "ttft_ms": 10,
+                    "stop_reason": "end_turn" if index == len(turns) else "tool_use",
+                })
+            usage = {
+                "schema_version": 2,
+                "provider": "anthropic",
+                "model": "claude-sonnet-5",
+                "base": {
+                    "system_prompt_tokens": 90,
+                    "tools": [{"name": "read", "schema_tokens": 10}],
+                    "tools_total_tokens": 10,
+                    "base_total_tokens": 100,
+                },
+                "turns": normalized,
+                "tools": [{"i": 1, "turn": 1, "name": "read", "call_id": f"iris-{suffix}"}],
+                "totals": {
+                    "fresh": sum(t[0] for t in turns),
+                    "cache_read": sum(t[1] for t in turns),
+                    "cache_write": sum(t[2] for t in turns),
+                    "output": sum(t[3] for t in turns),
+                    "reasoning": 0,
+                    "input_full": sum(sum(t[:3]) for t in turns),
+                },
+            }
+        (agent / "iris_usage.json").write_text(json.dumps(usage))
+        return trial
+
+    @staticmethod
+    def write_cc_trial(job, task, suffix, reward, turns=None):
+        turns = turns or [(10, 80, 10, 5), (20, 100, 30, 10)]
+        trial = job / f"{task}__{suffix}"
+        agent = trial / "agent"
+        agent.mkdir(parents=True)
+        TokenAnalyzerEndToEndTests.write_result(trial, task, reward)
+        events = []
+        steps = []
+        for index, (fresh, read, write, output) in enumerate(turns, 1):
+            usage = {
+                "input_tokens": fresh,
+                "cache_read_input_tokens": read,
+                "cache_creation_input_tokens": write,
+                "output_tokens": 1,
+            }
+            content = ([{"type": "tool_use", "id": f"cc-{suffix}", "name": "Read", "input": {"file_path": "x"}}]
+                       if index == 1 else [{"type": "text", "text": "done"}])
+            start = {"type": "assistant", "message": {"id": f"{suffix}-{index}", "usage": usage, "content": []}}
+            final = {"type": "assistant", "message": {"id": f"{suffix}-{index}", "usage": usage, "content": content}}
+            events.extend((start, final))
+            steps.append({"source": "agent", "metrics": {"completion_tokens": output}})
+        (agent / "claude-code.txt").write_text("\n".join(json.dumps(event) for event in events) + "\n")
+        trajectory = {
+            "schema_version": "ATIF-v1.7",
+            "agent": {"model_name": "claude-sonnet-5"},
+            "steps": steps,
+            "final_metrics": {
+                "total_prompt_tokens": sum(sum(t[:3]) for t in turns),
+                "total_completion_tokens": sum(t[3] for t in turns),
+                "total_steps": len(turns),
+                "extra": {
+                    "total_cache_read_input_tokens": sum(t[1] for t in turns),
+                    "total_cache_creation_input_tokens": sum(t[2] for t in turns),
+                },
+            },
+        }
+        (agent / "trajectory.json").write_text(json.dumps(trajectory))
+        return trial
+
+    def test_cli_builds_filtered_reports_distributions_costs_and_exclusions(self):
+        with tempfile.TemporaryDirectory(dir=ROOT) as directory:
+            root = Path(directory)
+            iris_job = root / "iris-job"
+            cc_job = root / "cc-job"
+            iris_job.mkdir()
+            cc_job.mkdir()
+
+            self.write_iris_trial(iris_job, "shared", "i1", 1.0)
+            self.write_iris_trial(iris_job, "shared", "i2", 1.0, [(10, 80, 10, 5), (30, 120, 50, 20)])
+            self.write_cc_trial(cc_job, "shared", "c1", 1.0)
+            self.write_cc_trial(cc_job, "shared", "c2", 1.0, [(10, 80, 10, 5), (30, 120, 50, 20)])
+            self.write_iris_trial(iris_job, "legacy", "i1", 1.0, legacy=True)
+            self.write_cc_trial(cc_job, "legacy", "c1", 1.0, [(10, 80, 10, 10)])
+            self.write_iris_trial(iris_job, "iris-only", "i1", 1.0)
+            self.write_cc_trial(cc_job, "iris-only", "c1", 0.0)
+            self.write_iris_trial(iris_job, "timeout-task", "i1", 0.0, log="agent timed out")
+            self.write_cc_trial(cc_job, "timeout-task", "c1", 1.0)
+            self.write_iris_trial(iris_job, "infra-task", "i1", 0.0, exception={"type": "DockerError"})
+            self.write_cc_trial(cc_job, "infra-task", "c1", 1.0)
+
+            markdown = root / "report.md"
+            json_report = root / "report.json"
+            completed = subprocess.run(
+                [sys.executable, str(ROOT / "analyze_tokens.py"), str(iris_job), str(cc_job),
+                 "--output", str(markdown), "--json", str(json_report)],
+                cwd=root,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            report = markdown.read_text()
+            data = json.loads(json_report.read_text())
+
+        self.assertIn("# Harness token-efficiency comparison", completed.stdout)
+        self.assertEqual(completed.stdout.rstrip(), report.rstrip())
+        self.assertEqual(data["both_solved_tasks"], ["legacy", "shared"])
+        self.assertIn("| shared | iris | 2 |", report)
+        self.assertEqual(data["aggregates"]["iris"]["input_full"]["n"], 3)
+
+        first_iris = next(a for a in data["attempts"] if a["trial"] == "shared__i1")
+        self.assertEqual(first_iris["metrics"]["totals"]["input_full"], 250)
+        self.assertEqual(first_iris["metrics"]["totals"]["input_beyond_base"], 50)
+        self.assertAlmostEqual(first_iris["metrics"]["totals"]["cost_actual"], 0.000744)
+        self.assertAlmostEqual(first_iris["metrics"]["totals"]["cost_cold"], 0.00102)
+
+        warnings = "\n".join(data["warnings"])
+        self.assertIn("legacy iris usage report", warnings)
+        self.assertIn("used ATIF per-step completion_tokens", warnings)
+        self.assertNotIn("does not match final_metrics", warnings)
+
+        failed_exclusions = {
+            (row["task"], row["harness"]): row["category"]
+            for row in data["exclusions"]
+            if row["harness"] == "iris" or row["task"] == "iris-only"
+        }
+        self.assertEqual(failed_exclusions[("iris-only", "claude-code")], "capability")
+        self.assertEqual(failed_exclusions[("timeout-task", "iris")], "timeout")
+        self.assertEqual(failed_exclusions[("infra-task", "iris")], "infra")
+        excluded_cc = next(line for line in report.splitlines() if line.startswith("| iris-only | claude-code"))
+        self.assertIn("| - | - | - | - | - | - | 0.00 | - | - |", excluded_cc)
 
 
 if __name__ == "__main__":
