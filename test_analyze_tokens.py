@@ -8,12 +8,12 @@ from pathlib import Path
 import analyze_tokens as analyzer
 
 
-WORK = Path("/mnt/bench/work")
+ROOT = Path(__file__).resolve().parent
 
 
 class TokenAnalyzerTests(unittest.TestCase):
     def test_iris_v2_golden_fixture(self):
-        parsed = analyzer.parse_iris_usage(WORK / "fixtures" / "iris_usage.v2.json")
+        parsed = analyzer.parse_iris_usage(ROOT / "fixtures" / "iris_usage.v2.json")
         self.assertIsNotNone(parsed)
         self.assertEqual(parsed["schema_version"], 2)
         self.assertEqual(parsed["totals"]["input_full"], 14_700)
@@ -21,7 +21,7 @@ class TokenAnalyzerTests(unittest.TestCase):
         self.assertEqual(parsed["warnings"], [])
 
     def test_legacy_iris_has_totals_but_no_timeline_or_cost(self):
-        with tempfile.TemporaryDirectory(dir=WORK) as directory:
+        with tempfile.TemporaryDirectory(dir=ROOT) as directory:
             path = Path(directory) / "usage.json"
             path.write_text(json.dumps({
                 "provider_turns": 2,
@@ -39,11 +39,51 @@ class TokenAnalyzerTests(unittest.TestCase):
         self.assertIsNone(parsed["totals"]["cost_actual"])
         self.assertIn("legacy", parsed["warnings"][0])
 
+    def test_reward_falls_back_to_legacy_top_level_fields(self):
+        for field in ("reward", "score"):
+            with self.subTest(field=field), tempfile.TemporaryDirectory(dir=ROOT) as directory:
+                trial = Path(directory)
+                (trial / "result.json").write_text(json.dumps({"task_name": "legacy", field: 0.75}))
+                task, reward, _ = analyzer.task_and_reward(trial)
+                self.assertEqual(task, "legacy")
+                self.assertEqual(reward, 0.75)
+
+    def test_cc_atif_output_correction_clears_final_metrics_mismatch(self):
+        usage = {
+            "input_tokens": 2,
+            "cache_read_input_tokens": 80,
+            "cache_creation_input_tokens": 18,
+            "output_tokens": 5,
+        }
+        event = {"type": "assistant", "message": {"id": "m1", "usage": usage, "content": []}}
+        trajectory = {
+            "schema_version": "ATIF-v1.7",
+            "agent": {"model_name": "claude-sonnet-5"},
+            "steps": [{"source": "agent", "metrics": {"completion_tokens": 20}}],
+            "final_metrics": {
+                "total_prompt_tokens": 100,
+                "total_completion_tokens": 20,
+                "extra": {
+                    "total_cache_read_input_tokens": 80,
+                    "total_cache_creation_input_tokens": 18,
+                },
+            },
+        }
+        with tempfile.TemporaryDirectory(dir=ROOT) as directory:
+            trial = Path(directory)
+            agent = trial / "agent"
+            agent.mkdir()
+            (agent / "claude-code.txt").write_text(json.dumps(event) + "\n")
+            (agent / "trajectory.json").write_text(json.dumps(trajectory))
+            parsed = analyzer.parse_cc_trial(trial)
+        self.assertEqual(parsed["totals"]["output"], 20)
+        self.assertFalse(any("does not match final_metrics" in warning for warning in parsed["warnings"]))
+
     def test_cc_usage_deduplicates_usage_and_tools_by_message_and_call_id(self):
         usage = {"input_tokens": 2, "cache_read_input_tokens": 80, "cache_creation_input_tokens": 18, "output_tokens": 7}
         message_start = {"type": "assistant", "message": {"id": "m1", "usage": usage, "content": []}}
         message_final = {"type": "assistant", "message": {"id": "m1", "usage": usage, "content": [{"type": "tool_use", "id": "tool-1", "name": "Read", "input": {"file_path": "x"}}]}}
-        with tempfile.TemporaryDirectory(dir=WORK) as directory:
+        with tempfile.TemporaryDirectory(dir=ROOT) as directory:
             path = Path(directory) / "claude-code.txt"
             path.write_text("\n".join(json.dumps(x) for x in (message_start, message_final, message_final)))
             turns, tools, warnings = analyzer.cc_usage_records(path)
