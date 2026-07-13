@@ -347,6 +347,18 @@ def calculate_cost(turns: list[dict[str, Any]], rates: dict[str, float]) -> tupl
     return actual / 1_000_000, cold / 1_000_000
 
 
+def cache_read_pct(turns: list[dict[str, Any]]) -> float | None:
+    """Cache-read share of input over the given turns, or None if no input.
+
+    Passing turns[1:] excludes the cold turn-1 cache write, isolating
+    steady-state reuse — the metric that separates a genuine cache-breakpoint
+    problem (stays low with turn 1 removed) from a cold-start artifact (jumps
+    to near-parity once the one-time cold write is dropped)."""
+    read = sum(number(t.get("cache_read")) for t in turns)
+    full = sum(number(t.get("input_full")) for t in turns)
+    return 100 * read / full if full else None
+
+
 def enrich_metrics(metrics: dict[str, Any]) -> None:
     totals = metrics["totals"]
     turns = totals.get("turns")
@@ -356,6 +368,13 @@ def enrich_metrics(metrics: dict[str, Any]) -> None:
         totals["input_beyond_base"] = totals["input_full"] - base_total * turns
     else:
         totals["input_beyond_base"] = None
+    timeline = metrics.get("turns") or []
+    totals["cache_read_pct"] = cache_read_pct(timeline)
+    totals["cache_read_pct_ex_turn1"] = cache_read_pct(timeline[1:]) if len(timeline) > 1 else None
+    # Per-turn cache-read share, so the cold-turn-1 -> warm-tail pattern is
+    # visible directly rather than inferred from aggregates.
+    for turn in timeline:
+        turn["cache_read_pct"] = cache_read_pct([turn])
     rates = pricing_for(metrics.get("model"))
     if not metrics.get("legacy") and metrics.get("turns") and rates:
         actual, cold = calculate_cost(metrics["turns"], rates)

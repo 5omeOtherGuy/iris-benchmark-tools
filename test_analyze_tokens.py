@@ -159,6 +159,29 @@ class TokenAnalyzerTests(unittest.TestCase):
         analyzer.enrich_metrics(metrics)
         self.assertEqual(metrics["totals"]["input_beyond_base"], 150)
 
+    def test_steady_state_cache_read_excludes_cold_turn1(self):
+        # Cold turn 1 (all fresh+write, no read) drags the overall cache-read%
+        # down; turns 2..N are warm. Excluding turn 1 must jump to near-parity,
+        # demonstrating a cold-start artifact rather than a breakpoint problem.
+        metrics = {
+            "model": "unknown",
+            "legacy": False,
+            "base": {"base_total_tokens": 100},
+            "turns": [
+                {"fresh": 100, "cache_read": 0, "cache_write": 900, "output": 5, "input_full": 1000},
+                {"fresh": 20, "cache_read": 950, "cache_write": 30, "output": 5, "input_full": 1000},
+                {"fresh": 20, "cache_read": 950, "cache_write": 30, "output": 5, "input_full": 1000},
+            ],
+            "totals": {"turns": 3, "input_full": 3000},
+        }
+        analyzer.enrich_metrics(metrics)
+        self.assertAlmostEqual(metrics["totals"]["cache_read_pct"], 100 * 1900 / 3000)
+        self.assertAlmostEqual(metrics["totals"]["cache_read_pct_ex_turn1"], 95.0)
+        per_turn = [t["cache_read_pct"] for t in metrics["turns"]]
+        self.assertEqual(per_turn[0], 0.0)
+        self.assertAlmostEqual(per_turn[1], 95.0)
+        self.assertAlmostEqual(per_turn[2], 95.0)
+
     def test_cost_and_cold_normalization(self):
         rates = {"input": 2.0, "output": 10.0, "cache_write": 2.5, "cache_read": 0.2}
         turns = [
