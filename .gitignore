@@ -14,6 +14,7 @@
 !README.md
 !run-bench.sh
 !analyze_tokens.py
+!test_analyze_tokens.py
 !agents
 !fixtures
 
