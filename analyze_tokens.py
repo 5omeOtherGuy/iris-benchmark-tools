@@ -114,7 +114,13 @@ def parse_iris_usage(path: Path) -> dict[str, Any] | None:
 
     warnings: list[str] = []
     schema = usage.get("schema_version")
-    if schema not in (2, "2", "v2"):
+    raw_turns = usage.get("turns")
+    # The emitter does not stamp `schema_version` (see src/print.rs UsageReport),
+    # so detect v2 structurally by its per-turn timeline + base decomposition.
+    # Without this, a genuine v2 report is silently downgraded to the totals-only
+    # legacy path, discarding everything v2 exists to provide.
+    has_v2_shape = isinstance(raw_turns, list) and isinstance(usage.get("base"), dict)
+    if schema not in (2, "2", "v2") and not has_v2_shape:
         warnings.append("legacy iris usage report: totals only; per-turn/base/cost unavailable")
         totals = {
             "turns": usage.get("provider_turns"),
@@ -138,7 +144,6 @@ def parse_iris_usage(path: Path) -> dict[str, Any] | None:
             "warnings": warnings,
         }
 
-    raw_turns = usage.get("turns")
     raw_tools = usage.get("tools")
     if not isinstance(raw_turns, list) or not isinstance(raw_tools, list):
         warnings.append("invalid iris v2 report: turns/tools must be arrays")
@@ -159,9 +164,24 @@ def parse_iris_usage(path: Path) -> dict[str, Any] | None:
     normalized_base["base_total_tokens"] = base_total
     totals = totals_from_turns(turns, tools)
     reported = usage.get("totals") if isinstance(usage.get("totals"), dict) else {}
-    for key in ("fresh", "cache_read", "cache_write", "input_full", "output", "reasoning"):
-        if isinstance(reported.get(key), (int, float)) and totals[key] != reported[key]:
-            warnings.append(f"iris totals.{key} mismatch: timeline={totals[key]} reported={reported[key]}")
+    # The emitter's `totals` block uses v1-style names (input_tokens,
+    # cache_read_input_tokens, ...); the frozen v2 fixture uses the per-turn
+    # names. Accept either so the cross-check actually fires against real output.
+    recon_aliases = {
+        "fresh": ("fresh",),
+        "cache_read": ("cache_read", "cache_read_input_tokens"),
+        "cache_write": ("cache_write", "cache_write_input_tokens"),
+        "input_full": ("input_full", "input_tokens"),
+        "output": ("output", "output_tokens"),
+        "reasoning": ("reasoning", "reasoning_output_tokens"),
+    }
+    for key, aliases in recon_aliases.items():
+        for alias in aliases:
+            value = reported.get(alias)
+            if isinstance(value, (int, float)):
+                if totals[key] != value:
+                    warnings.append(f"iris totals.{key} mismatch: timeline={totals[key]} reported={value}")
+                break
     return {
         "schema_version": 2,
         "provider": usage.get("provider"),

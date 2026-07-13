@@ -22,6 +22,47 @@ class TokenAnalyzerTests(unittest.TestCase):
         self.assertEqual(parsed["totals"]["tools"], 2)
         self.assertEqual(parsed["warnings"], [])
 
+    def test_real_emitter_v2_without_schema_version_is_not_downgraded(self):
+        # Reproduces actual src/print.rs output: no `schema_version` field, and
+        # a `totals` block using v1-style names (input_tokens, cache_*_input_*).
+        # Must be detected as v2 (populated timeline + base), not legacy.
+        with tempfile.TemporaryDirectory(dir=ROOT) as directory:
+            path = Path(directory) / "iris_usage.json"
+            path.write_text(json.dumps({
+                "provider": "anthropic",
+                "model": "claude-sonnet-5",
+                "base": {
+                    "system_prompt_tokens": 90,
+                    "tools": [{"name": "read", "schema_tokens": 10}],
+                    "tools_total_tokens": 10,
+                    "base_total_tokens": 100,
+                },
+                "turns": [
+                    {"i": 0, "fresh": 10, "cache_read": 80, "cache_write": 10,
+                     "output": 5, "reasoning": 0, "input_full": 100,
+                     "duration_ms": 100, "ttft_ms": 10, "stop_reason": "end_turn"},
+                ],
+                "tools": [{"i": 0, "turn": 0, "name": "read", "call_id": "c1"}],
+                # v1-style totals names, exactly as the emitter serializes them.
+                "totals": {
+                    "provider_turns": 1,
+                    "input_tokens": 100,
+                    "output_tokens": 5,
+                    "reasoning_output_tokens": 0,
+                    "cache_read_input_tokens": 80,
+                    "cache_write_input_tokens": 10,
+                    "tool_calls": 1,
+                },
+            }))
+            parsed = analyzer.parse_iris_usage(path)
+        self.assertIsNotNone(parsed)
+        self.assertEqual(parsed["schema_version"], 2)
+        self.assertFalse(parsed["legacy"])
+        self.assertEqual(len(parsed["turns"]), 1)
+        self.assertEqual(parsed["totals"]["input_full"], 100)
+        # v1-style totals reconcile with the timeline: no mismatch warnings.
+        self.assertEqual(parsed["warnings"], [])
+
     def test_legacy_iris_has_totals_but_no_timeline_or_cost(self):
         with tempfile.TemporaryDirectory(dir=ROOT) as directory:
             path = Path(directory) / "usage.json"
