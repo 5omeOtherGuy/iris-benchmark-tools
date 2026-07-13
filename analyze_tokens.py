@@ -59,6 +59,11 @@ def task_and_reward(trial_dir: Path) -> tuple[str, float | None, dict[str, Any]]
     if isinstance(rewards, dict) and isinstance(rewards.get("reward"), (int, float)):
         reward = float(rewards["reward"])
     if reward is None:
+        for key in ("reward", "score"):
+            if isinstance(result.get(key), (int, float)):
+                reward = float(result[key])
+                break
+    if reward is None:
         try:
             reward = float((trial_dir / "verifier" / "reward.txt").read_text().strip())
         except (OSError, ValueError):
@@ -268,10 +273,6 @@ def parse_cc_trial(trial_dir: Path) -> dict[str, Any] | None:
     turns, tools, warnings = cc_usage_records(trial_dir / "agent" / "claude-code.txt")
     expected = expected_cc_totals(final_metrics)
     observed = totals_from_turns(turns, tools)
-    mismatches = [key for key in expected if observed[key] != expected[key]]
-    if mismatches:
-        details = ", ".join(f"{key} {observed[key]} != {expected[key]}" for key in mismatches)
-        warnings.append(f"Claude Code deduped usage does not match final_metrics: {details}")
 
     # Claude Code 2.1.207's stream omits hidden reasoning from output_tokens.
     # ATIF step metrics are authoritative when they map one-to-one to turns.
@@ -283,6 +284,10 @@ def parse_cc_trial(trial_dir: Path) -> dict[str, Any] | None:
                 turn["output"] = output
             warnings.append("Claude Code stream output omitted hidden tokens; used ATIF per-step completion_tokens")
     observed = totals_from_turns(turns, tools)
+    mismatches = [key for key in expected if observed[key] != expected[key]]
+    if mismatches:
+        details = ", ".join(f"{key} {observed[key]} != {expected[key]}" for key in mismatches)
+        warnings.append(f"Claude Code deduped usage does not match final_metrics: {details}")
     base_total = turns[0]["input_full"] if turns else None
     agent = trajectory.get("agent") if isinstance(trajectory.get("agent"), dict) else {}
     return {
