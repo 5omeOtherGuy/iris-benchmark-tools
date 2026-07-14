@@ -168,6 +168,37 @@ class BenchmarkOnboardingTests(unittest.TestCase):
         self.assertIn("--n-concurrent\n3\n", recorded)
         self.assertFalse((temp / "should-not-exist").exists())
 
+    def test_runner_passes_explicit_codex_auth_path(self):
+        with tempfile.TemporaryDirectory() as directory:
+            temp = Path(directory)
+            fake_bin = temp / "bin"
+            fake_bin.mkdir()
+            capture = temp / "capture.txt"
+            fake_harbor = fake_bin / "harbor"
+            fake_harbor.write_text("#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$CAPTURE\"\n")
+            fake_harbor.chmod(0o755)
+            auth = temp / "custom-codex-auth.json"
+            auth.write_text("not inspected")
+            env = os.environ.copy()
+            env.update(
+                {
+                    "CAPTURE": str(capture),
+                    "CODEX_AUTH_JSON_PATH": str(auth),
+                    "HOME": str(temp / "home"),
+                    "PATH": f"{fake_bin}:{env['PATH']}",
+                }
+            )
+            result = subprocess.run(
+                [ROOT / "run-bench.sh", "codex", "openai/test", "-l", "1"],
+                text=True,
+                capture_output=True,
+                env=env,
+                check=False,
+            )
+            recorded = capture.read_text()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(f"--ae\nCODEX_AUTH_JSON_PATH={auth}\n", recorded)
+
     def test_runner_rejects_marker_without_version(self):
         with tempfile.TemporaryDirectory() as directory:
             marker = Path(directory) / "setup"

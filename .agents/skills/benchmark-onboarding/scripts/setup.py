@@ -94,6 +94,12 @@ def local_iris_sources(repo: Path) -> list[dict[str, object]]:
     return found
 
 
+def configured_file(env_name: str, default: Path) -> bool:
+    configured = os.environ.get(env_name)
+    path = Path(configured).expanduser() if configured else default
+    return path.is_file()
+
+
 def inspect(repo: Path) -> dict[str, object]:
     commands = {name: command_report(name) for name in COMMANDS}
     docker_daemon = None
@@ -118,9 +124,16 @@ def inspect(repo: Path) -> dict[str, object]:
             "pi": {"harbor_agent": "pi", "host_cli": commands["pi"]},
         },
         "credential_presence": {
-            "claude_credentials": (Path.home() / ".claude" / ".credentials.json").is_file(),
-            "iris_auth": (Path.home() / ".iris" / "auth.json").is_file(),
-            "codex_auth": (Path.home() / ".codex" / "auth.json").is_file(),
+            "claude_credentials": configured_file(
+                "IRIS_CLAUDE_CREDENTIALS_PATH",
+                Path.home() / ".claude" / ".credentials.json",
+            ),
+            "iris_auth": configured_file(
+                "IRIS_AUTH_JSON_PATH", Path.home() / ".iris" / "auth.json"
+            ),
+            "codex_auth": configured_file(
+                "CODEX_AUTH_JSON_PATH", Path.home() / ".codex" / "auth.json"
+            ),
             "claude_code_oauth_env": bool(os.environ.get("CLAUDE_CODE_OAUTH_TOKEN")),
         },
         "local_iris_sources": local_iris_sources(repo),

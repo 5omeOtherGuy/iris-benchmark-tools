@@ -73,8 +73,9 @@ case "$AGENT" in
 esac
 
 EXTRA_ENV=()
-if [[ "$AGENT" == "codex" && -f "$HOME/.codex/auth.json" ]]; then
-  EXTRA_ENV+=(--ae "CODEX_AUTH_JSON_PATH=$HOME/.codex/auth.json")
+CODEX_AUTH_PATH="${CODEX_AUTH_JSON_PATH:-$HOME/.codex/auth.json}"
+if [[ "$AGENT" == "codex" && -f "$CODEX_AUTH_PATH" ]]; then
+  EXTRA_ENV+=(--ae "CODEX_AUTH_JSON_PATH=$CODEX_AUTH_PATH")
 fi
 if [[ "$AGENT" == "claude-code" ]]; then
   if [[ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]]; then
