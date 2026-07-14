@@ -297,15 +297,33 @@ def parse_cc_trial(trial_dir: Path) -> dict[str, Any] | None:
     expected = expected_cc_totals(final_metrics)
     observed = totals_from_turns(turns, tools)
 
-    # Claude Code 2.1.207's stream omits hidden reasoning from output_tokens.
-    # ATIF step metrics are authoritative when they map one-to-one to turns.
+    # Claude Code's stream omits hidden reasoning from output_tokens, so the
+    # per-turn stream sum undercounts (observed 10 vs ATIF 6558 in real trials).
+    # ATIF total_completion_tokens is authoritative. Prefer an exact per-step
+    # remap when steps map 1:1 to turns; otherwise scale the aggregate to the
+    # ATIF total so cost is never computed off the broken stream sum.
     agent_steps = [s for s in trajectory.get("steps", []) if isinstance(s, dict) and s.get("source") == "agent"]
-    if observed["output"] != expected["output"] and len(agent_steps) == len(turns):
+    if observed["output"] != expected["output"] and expected["output"] > 0 and turns:
         step_outputs = [number((s.get("metrics") or {}).get("completion_tokens")) for s in agent_steps]
-        if sum(step_outputs) == expected["output"]:
+        if len(agent_steps) == len(turns) and sum(step_outputs) == expected["output"]:
             for turn, output in zip(turns, step_outputs):
                 turn["output"] = output
             warnings.append("Claude Code stream output omitted hidden tokens; used ATIF per-step completion_tokens")
+        else:
+            # No 1:1 mapping: distribute the ATIF total across turns in
+            # proportion to their stream output (even split if all zero), fixing
+            # rounding drift onto the last turn so the aggregate matches exactly.
+            stream_out = [number(t["output"]) for t in turns]
+            total_stream = sum(stream_out)
+            if total_stream > 0:
+                alloc = [round(expected["output"] * o / total_stream) for o in stream_out]
+            else:
+                even = expected["output"] // len(turns)
+                alloc = [even] * len(turns)
+            alloc[-1] += expected["output"] - sum(alloc)
+            for turn, output in zip(turns, alloc):
+                turn["output"] = output
+            warnings.append("Claude Code stream output sum unreliable; scaled to ATIF total_completion_tokens")
     observed = totals_from_turns(turns, tools)
     mismatches = [key for key in expected if observed[key] != expected[key]]
     if mismatches:

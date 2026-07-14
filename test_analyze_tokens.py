@@ -122,6 +122,38 @@ class TokenAnalyzerTests(unittest.TestCase):
         self.assertEqual(parsed["totals"]["output"], 20)
         self.assertFalse(any("does not match final_metrics" in warning for warning in parsed["warnings"]))
 
+    def test_cc_output_falls_back_to_atif_total_when_steps_dont_map_to_turns(self):
+        # Real failure mode: stream output_tokens sum is tiny (hidden reasoning
+        # omitted) and ATIF steps don't map 1:1 to deduped turns, so the exact
+        # per-step remap can't fire. Aggregate output must still equal the
+        # authoritative ATIF total, not the broken stream sum.
+        usage = {"input_tokens": 2, "cache_read_input_tokens": 80, "cache_creation_input_tokens": 18, "output_tokens": 5}
+        events = []
+        for idx in (1, 2):  # two turns from the stream
+            mid = f"m{idx}"
+            events.append({"type": "assistant", "message": {"id": mid, "usage": usage, "content": []}})
+            events.append({"type": "assistant", "message": {"id": mid, "usage": usage, "content": []}})
+        trajectory = {
+            "schema_version": "ATIF-v1.7",
+            "agent": {"model_name": "claude-sonnet-5"},
+            "steps": [{"source": "agent", "metrics": {"completion_tokens": 6558}}],  # 1 step != 2 turns
+            "final_metrics": {
+                "total_prompt_tokens": 2 * (2 + 80 + 18),
+                "total_completion_tokens": 6558,
+                "extra": {"total_cache_read_input_tokens": 160, "total_cache_creation_input_tokens": 36},
+            },
+        }
+        with tempfile.TemporaryDirectory(dir=ROOT) as directory:
+            trial = Path(directory)
+            agent = trial / "agent"
+            agent.mkdir()
+            (agent / "claude-code.txt").write_text("\n".join(json.dumps(e) for e in events))
+            (agent / "trajectory.json").write_text(json.dumps(trajectory))
+            parsed = analyzer.parse_cc_trial(trial)
+        self.assertEqual(parsed["totals"]["output"], 6558)  # not the stream sum (10)
+        self.assertFalse(any("does not match final_metrics" in w for w in parsed["warnings"]))
+        self.assertTrue(any("scaled to ATIF total_completion_tokens" in w for w in parsed["warnings"]))
+
     def test_cc_usage_deduplicates_usage_and_tools_by_message_and_call_id(self):
         usage = {"input_tokens": 2, "cache_read_input_tokens": 80, "cache_creation_input_tokens": 18, "output_tokens": 7}
         message_start = {"type": "assistant", "message": {"id": "m1", "usage": usage, "content": []}}
