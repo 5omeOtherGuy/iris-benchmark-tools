@@ -39,17 +39,21 @@ class RepositorySecurityTests(unittest.TestCase):
         self.assertIn("secret scan: clean", result.stdout)
 
     def test_scanner_rejects_benchmark_payload_paths(self):
-        temporary, root = self.make_repo()
-        self.addCleanup(temporary.cleanup)
-        payload = root / "jobs" / "trial" / "result.json"
-        payload.parent.mkdir(parents=True)
-        payload.write_text("{}\n")
-        subprocess.run(["git", "-C", root, "add", "jobs/trial/result.json"], check=True)
+        for relative in ("jobs/trial/result.json", ".benchmark-setup"):
+            with self.subTest(relative=relative):
+                temporary, root = self.make_repo()
+                try:
+                    payload = root / relative
+                    payload.parent.mkdir(parents=True, exist_ok=True)
+                    payload.write_text("{}\n")
+                    subprocess.run(["git", "-C", root, "add", relative], check=True)
 
-        result = self.run_scanner(root)
+                    result = self.run_scanner(root)
 
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("forbidden tracked paths", result.stderr)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn("forbidden tracked paths", result.stderr)
+                finally:
+                    temporary.cleanup()
 
     def test_scanner_rejects_credential_content(self):
         temporary, root = self.make_repo()
@@ -69,6 +73,7 @@ class RepositorySecurityTests(unittest.TestCase):
         canonical = ROOT / ".agents" / "skills"
         claude = ROOT / ".claude" / "skills"
         expected = {
+            "benchmark-onboarding",
             "harness-benchmark",
             "harness-telemetry",
             "benchmark-telemetry-report",

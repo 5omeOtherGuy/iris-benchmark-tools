@@ -12,7 +12,8 @@ This repository contains publishable benchmark tooling, not benchmark data.
 
 ## Workflow
 
-- Use the `harness-benchmark` skill to design and run comparisons.
+- Before any benchmark setup or run, check for `.benchmark-setup`. If it is absent, use `benchmark-onboarding` and do not spend model tokens until its preflight succeeds. Never run that skill when the marker exists.
+- Use the `harness-benchmark` skill to design and run comparisons after onboarding.
 - Use `harness-telemetry` as the source-schema contract.
 - Use `benchmark-telemetry-report` for deep analysis and report generation.
 - Run contenders sequentially by default. Use identical task filters and model IDs for controlled comparisons.

@@ -20,7 +20,7 @@ else
 fi
 cd "$REPO_ROOT"
 
-FORBIDDEN_PATH='(^|/)(jobs|assets|\.eda-archives)(/|$)|(^|/)(secrets\.env|\.env|auth\.json|[^/]*credentials[^/]*\.json)$|\.(tar|tar\.gz|zip)$'
+FORBIDDEN_PATH='(^|/)(jobs|assets|\.eda-archives|\.benchmark-cache)(/|$)|(^|/)(secrets\.env|\.env|\.benchmark-setup|auth\.json|[^/]*credentials[^/]*\.json)$|\.(tar|tar\.gz|zip)$'
 
 # Split well-known prefixes so the scanner does not match its own source.
 CONTENT_PATTERNS=(

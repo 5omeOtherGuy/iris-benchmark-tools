@@ -15,11 +15,16 @@
 !/scripts/
 !/scripts/check-no-secrets.sh
 !/test_analyze_tokens.py
+!/test_benchmark_onboarding.py
 !/test_repository_security.py
 !/.agents/
 !/.agents/skills/
 !/.agents/skills/*/
 !/.agents/skills/*/SKILL.md
+!/.agents/skills/*/agents/
+!/.agents/skills/*/agents/openai.yaml
+!/.agents/skills/*/scripts/
+!/.agents/skills/*/scripts/*.py
 !/.claude/
 !/.claude/skills/
 !/.claude/skills/*
@@ -32,6 +37,8 @@
 **/.env
 **/*.credentials.json
 **/auth.json
+**/.benchmark-setup
+**/.benchmark-cache/
 **/jobs/
 **/assets/
 **/.eda-archives/

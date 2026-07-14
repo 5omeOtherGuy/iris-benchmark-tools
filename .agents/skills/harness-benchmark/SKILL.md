@@ -5,7 +5,7 @@ description: Benchmark coding-agent harnesses (Iris, Claude Code, Codex CLI, and
 
 # Harness benchmark workflow
 
-Compare coding-agent harnesses on identical tasks with Harbor and Terminal-Bench. Read the repository `README.md` first. Resolve the repository root with `git rev-parse --show-toplevel`; use `BENCH_JOBS_DIR` when set and otherwise use its ignored `jobs/` directory.
+Compare coding-agent harnesses on identical tasks with Harbor and Terminal-Bench. Read the repository `README.md` first. Resolve the repository root with `git rev-parse --show-toplevel`; use `BENCH_JOBS_DIR` when set and otherwise use its ignored `jobs/` directory. If `.benchmark-setup` is absent, stop and use `benchmark-onboarding` before this workflow.
 
 Never commit or publish jobs, transcripts, credentials, generated reports from real tasks, archives, or binaries.
 
