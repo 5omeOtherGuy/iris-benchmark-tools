@@ -1,70 +1,102 @@
 # Iris Benchmark Tools
 
-Run controlled coding-agent comparisons with [Harbor](https://github.com/laude-institute/harbor), Terminal-Bench 2.0, Iris, and Harbor's built-in harnesses.
+Operational entry point for agents running controlled coding-agent benchmarks with Harbor and Terminal-Bench 2.0.
 
-The repository contains the runner, Iris Harbor adapter, token-efficiency analyzer, synthetic fixtures, tests, and four agent skills. It deliberately excludes benchmark jobs, transcripts, reports, credentials, archives, and binaries.
+## Start here
 
-## What this measures
+1. Resolve the repository root with `git rev-parse --show-toplevel`.
+2. Read [`AGENTS.md`](AGENTS.md).
+3. Check `<root>/.benchmark-setup`.
+4. If the marker is absent, execute [`benchmark-onboarding`](.agents/skills/benchmark-onboarding/SKILL.md). Do not start a model-backed benchmark.
+5. If the marker exists, execute [`harness-benchmark`](.agents/skills/harness-benchmark/SKILL.md).
+6. Use [`harness-telemetry`](.agents/skills/harness-telemetry/SKILL.md) as the source-schema contract and [`benchmark-telemetry-report`](.agents/skills/benchmark-telemetry-report/SKILL.md) for deep analysis.
 
-Use the same provider model and task set across harnesses to isolate harness behavior. Product comparisons with different models are also possible, but model and harness effects are then confounded.
+The files under `.agents/skills/` are canonical. Claude Code reaches the same files through `.claude/skills/`.
 
-The analyzer reports:
+## Execution contract
 
-- task success and failures;
-- provider turns and tool calls;
-- fresh, cache-read, cache-write, full-input, output, and reasoning tokens;
-- observed and cold-normalized API-equivalent cost;
-- fixed-prefix-netted input where supported;
-- per-attempt and task-balanced aggregates;
-- parser warnings and telemetry exclusions.
+- Inspect before asking. Ask once for unresolved choices; do not ask for facts recoverable from the checkout, commands, setup marker, or telemetry.
+- Do not launch model-backed trials until the user approves contenders, model IDs, task scope, attempts, budget, and total run count.
+- Run contenders sequentially unless the user explicitly accepts credential-race, resource-contention, and timing risks.
+- In a controlled comparison, keep model ID, task selection, attempts, concurrency, and environment constant.
+- Preserve failed attempts, missing values, parser warnings, and outliers. Never convert missing telemetry to zero.
+- Never read or display credential contents. Direct the user to authenticate in their own shell.
+- Do not selectively rerun capability failures.
+- Do not delete raw jobs or prune Docker state without explicit confirmation.
 
-## Prerequisites
+## 1. Onboard a fresh checkout
 
-- Linux with Docker
-- Python 3.10 or newer
-- [Harbor](https://github.com/laude-institute/harbor) with `harbor` on `PATH`, or a Harbor source checkout selected with `HARBOR_DIR`
-- Credentials for each harness you run
+Skip this phase when `.benchmark-setup` exists.
 
-The Iris adapter uploads a local glibc binary when `IRIS_BINARY_PATH` is set. Otherwise it downloads the latest x86_64 GNU/Linux Iris release inside each task container. All Terminal-Bench 2.0 agent containers at the pinned dataset revision are glibc-based; a musl binary is needed only for other Alpine-based datasets.
-
-## First-run onboarding
-
-Open the cloned repository with Iris, Claude Code, Codex, or pi and ask to start a benchmark. When the ignored `.benchmark-setup` marker is absent, repository guidance invokes `benchmark-onboarding` before any token-spending run.
-
-The onboarding skill:
-
-- inventories Docker, Harbor, Iris, Claude Code, Codex, pi, authentication presence, and local Iris source builds;
-- asks which harnesses and which Iris build to use: latest published release, detected local developer checkout, installed binary, or custom binary;
-- validates private storage and concurrency;
-- runs install-only compatibility checks;
-- writes `.benchmark-setup` only after selected prerequisites pass.
-
-Invoke it explicitly with `$benchmark-onboarding` if your agent supports skill mentions. The marker contains paths and selections, never credentials, and `run-bench.sh` consumes it automatically. Environment variables still take precedence.
-
-## Authentication
-
-Keep credentials outside this repository. Export only the variables needed for the current shell:
+Run:
 
 ```bash
-# Claude Code harness: value created interactively by `claude setup-token`
-export CLAUDE_CODE_OAUTH_TOKEN="<token>"
-
-# Optional Iris credential overrides; these default to the normal user paths.
-export IRIS_CLAUDE_CREDENTIALS_PATH="$HOME/.claude/.credentials.json"
-export IRIS_AUTH_JSON_PATH="$HOME/.iris/auth.json"
-
-# Optional local Iris build instead of the latest release.
-export IRIS_BINARY_PATH="$HOME/src/iris-agent/target/release/iris"
+python3 .agents/skills/benchmark-onboarding/scripts/setup.py inspect --repo .
 ```
 
-Never put token values, credential JSON, or shell files containing secrets in this checkout. Benchmark transcripts can also capture sensitive tool output; treat the complete `jobs/` tree as private.
+Summarize the detected Docker, Harbor, harness, authentication-presence, and Iris-source facts. Ask only for unresolved machine-level choices:
 
-## Run a comparison
+- contenders: `iris`, `claude-code`, `codex`, or `pi`;
+- Iris build source, when selected: `latest-release`, `local-source`, `installed`, or `custom`;
+- private jobs directory and concurrency;
+- Harbor source path only when `harbor` is unavailable.
 
-From the repository root:
+Do not ask for model, task, attempt, or budget choices during onboarding. Do not install Docker, Harbor, package managers, or harness CLIs automatically. Never silently substitute one Iris build source for another.
+
+Follow the skill through no-token install checks and marker creation. Do not create or edit `.benchmark-setup` manually. Onboarding is complete only when selected prerequisites pass and the setup script writes the marker.
+
+## 2. Define the benchmark
+
+Recover prior user choices, then ask once for unresolved experiment fields:
+
+1. contenders;
+2. controlled comparison or product comparison;
+3. exact model ID for each contender;
+4. task filter or task count;
+5. attempts per task;
+6. primary metrics: resolution, tokens, API-equivalent cost, wall time, or all;
+7. budget, expected duration, storage, and retention requirements.
+
+Before running, present an execution manifest containing:
+
+- tasks × contenders × attempts;
+- run order and concurrency;
+- exact commands;
+- expected billing or subscription usage;
+- exact Iris release version or source commit;
+- whether the sample supports setup validation, directional findings, or broader claims.
+
+Wait for user approval of the manifest. Treat small `k=1` runs as smoke tests. Prefer at least 20 tasks for directional comparisons.
+
+## 3. Preflight without model requests
+
+Run applicable checks:
 
 ```bash
-# Controlled comparison: same model, same tasks, sequential legs.
+df -h .
+docker info --format '{{.ServerVersion}}'
+harbor --version
+harbor run --help
+```
+
+When Harbor comes from a source checkout, set `HARBOR_DIR`; the runner uses `uv run harbor` there.
+
+Validate each untested contender with one install-only trial:
+
+```bash
+./run-bench.sh <contender> <provider/model> \
+  --install-only -l 1 -y --job-name setup__<contender>
+```
+
+Install-only trials may download images and packages but must not make a model request. If Harbor rejects an argument, inspect its implemented CLI and adapt; do not guess.
+
+## 4. Run sequential legs
+
+`run-bench.sh` pins `terminal-bench@2.0`, maps `iris` to the repository adapter, applies setup defaults, and forwards remaining arguments to `harbor run`.
+
+Controlled example:
+
+```bash
 ./run-bench.sh iris anthropic/claude-sonnet-5 \
   -i '<task-glob>' -k 2 -y --job-name iris__pilot
 
@@ -72,48 +104,70 @@ From the repository root:
   -i '<task-glob>' -k 2 -y --job-name cc__pilot
 ```
 
-The runner defaults to:
+Use identical task-selection arguments for every leg. Start the next contender only after the prior one finishes. Monitor `<jobs-dir>/<job-name>/result.json`; process exit alone does not establish benchmark success.
 
-- dataset `terminal-bench@2.0`;
-- one concurrent trial;
-- output under `./jobs`.
+Classify failures from exact evidence as infrastructure, authentication, rate limit, harness, timeout, agent capability, tool misuse, or verifier failure. Apply only the predeclared retry policy. If a comparison remains incomplete, state exactly what ran.
 
-Override these without editing the script:
+## 5. Analyze and report
 
-```bash
-export BENCH_JOBS_DIR=/data/private-bench/jobs
-export HARNESS_BENCH_CONCURRENCY=2
-export HARBOR_DIR=$HOME/src/harbor   # only needed for a source checkout
-```
-
-Run contenders sequentially when they share credentials or the host is memory-constrained. Record exact harness, model, Harbor, and dataset versions with every result.
-
-## Analyze token efficiency
+Run the compatible Iris and Claude Code analyzer:
 
 ```bash
 python3 analyze_tokens.py \
-  "$BENCH_JOBS_DIR/iris__pilot" \
-  "$BENCH_JOBS_DIR/cc__pilot" \
+  '<jobs-dir>/iris__pilot' \
+  '<jobs-dir>/cc__pilot' \
   -o comparison.md \
   --json comparison.json
 ```
 
-If `BENCH_JOBS_DIR` is unset, replace it with `jobs`. The comparison includes token/cost aggregates only for tasks solved at least once by both harnesses; failed attempts and exclusions remain visible. Read parser warnings before drawing conclusions.
+Analysis requirements:
 
-Pricing is time-sensitive. The analyzer states its pricing date and refuses to price unknown models rather than guessing.
+- match tasks and attempts explicitly;
+- keep every failure and exclusion visible;
+- reconcile per-turn telemetry with aggregate totals;
+- separate fresh, cache-read, cache-write, full-input, output, and reasoning tokens;
+- report observed and cold-normalized API-equivalent cost when supported;
+- use tasks solved at least once by both harnesses for the primary token-efficiency set;
+- aggregate attempts within each task before aggregating across tasks;
+- report raw outcomes, controlled views, timing, and outliers;
+- state model, harness, Harbor, dataset, run-order, cache-state, environment, and sample-size caveats.
 
-## Agent skills
+The analyzer states its pricing date and refuses to price unknown models. Do not invent prices or unsupported telemetry.
 
-Repository-scoped skills live under `.agents/skills/`:
+A complete report includes an aggregate verdict, per-task outcomes, failure taxonomy, turns, tool calls, token/cache/cost decomposition, wall time, outliers, limitations, and concrete recommendations.
 
-- `benchmark-onboarding`: inventory and configure a fresh checkout without model-token spend;
-- `harness-benchmark`: design, execute, analyze, and clean up a comparison;
-- `harness-telemetry`: source schemas and collection semantics;
-- `benchmark-telemetry-report`: rigorous analysis and self-contained reporting.
+## Configuration
 
-Claude Code discovers the same canonical files through relative links in `.claude/skills/`. Agents that support `.agents/skills/` discover them directly. There is only one copy of each skill.
+Environment variables override `.benchmark-setup`; the marker overrides defaults.
 
-## Validate changes
+| Purpose | Environment variable | Default |
+|---|---|---|
+| Jobs directory | `BENCH_JOBS_DIR` | `<repo>/jobs` |
+| Trial concurrency | `HARNESS_BENCH_CONCURRENCY` | `1` |
+| Harbor source checkout | `HARBOR_DIR` | Harbor from `PATH` |
+| Iris binary | `IRIS_BINARY_PATH` | latest release |
+| Iris Claude credentials | `IRIS_CLAUDE_CREDENTIALS_PATH` | normal Claude store |
+| Iris auth store | `IRIS_AUTH_JSON_PATH` | normal Iris store |
+| Codex auth store | `CODEX_AUTH_JSON_PATH` | normal Codex store |
+| Claude Code OAuth | `CLAUDE_CODE_OAUTH_TOKEN` | required for Claude Code |
+
+For Claude Code, tell the user to run `claude setup-token` interactively and export the resulting variable. Never ask the user to paste a token into chat.
+
+## Repository map
+
+| Path | Use |
+|---|---|
+| `run-bench.sh` | Run one Harbor benchmark leg. |
+| `agents/iris_installed.py` | Install Iris in Harbor task containers. |
+| `analyze_tokens.py` | Produce Markdown and JSON telemetry comparisons. |
+| `.agents/skills/benchmark-onboarding/` | Configure and preflight a checkout. |
+| `.agents/skills/harness-benchmark/` | Design, run, analyze, and retain a comparison. |
+| `.agents/skills/harness-telemetry/` | Interpret Iris and Claude Code telemetry. |
+| `.agents/skills/benchmark-telemetry-report/` | Produce a rigorous final report. |
+| `fixtures/` | Synthetic parser fixtures. |
+| `test_*.py` | Toolkit tests. |
+
+## Validate toolkit changes
 
 ```bash
 python3 -m unittest -v
@@ -121,24 +175,4 @@ bash -n run-bench.sh scripts/check-no-secrets.sh
 ./scripts/check-no-secrets.sh --history
 ```
 
-The repository uses a fail-safe `.gitignore`: root files are ignored unless explicitly reviewed and allowlisted. Add an exception only for source, documentation, synthetic fixtures, or tests that are safe to publish.
-
-## Data policy
-
-Safe to publish:
-
-- source code and documentation;
-- synthetic telemetry fixtures;
-- tests and empty configuration examples.
-
-Do not publish:
-
-- `jobs/`, session transcripts, agent logs, or generated reports derived from real tasks;
-- OAuth tokens, API keys, credential stores, or environment files;
-- downloaded binaries, archives, container state, or private task assets.
-
-See [SECURITY.md](SECURITY.md) for reporting and response guidance.
-
-## License
-
-Licensed under either the Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE)) or the MIT License ([LICENSE](LICENSE)), at your option.
+Before publishing a toolkit change, inspect `git status`, the staged diff, and the complete tracked path list.
