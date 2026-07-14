@@ -1,0 +1,4 @@
+interface:
+  display_name: "Benchmark onboarding"
+  short_description: "Configure and verify benchmark prerequisites"
+  default_prompt: "Use $benchmark-onboarding to configure this checkout for its first benchmark run."

@@ -33,6 +33,8 @@ Store benchmark data and generated artifacts in the configured private benchmark
 
 ### 1. Establish the comparison
 
+Inspect available job directories and metadata before asking questions. If job selection, comparison type, intended audience, publication sensitivity, or required output formats remain unresolved, ask once in a concise batch; use a structured question tool when available. Do not ask for choices already supplied by the user or recoverable from preserved telemetry.
+
 Record before calculating:
 
 - job and trial directories;

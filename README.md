@@ -2,7 +2,7 @@
 
 Run controlled coding-agent comparisons with [Harbor](https://github.com/laude-institute/harbor), Terminal-Bench 2.0, Iris, and Harbor's built-in harnesses.
 
-The repository contains the runner, Iris Harbor adapter, token-efficiency analyzer, synthetic fixtures, tests, and three agent skills. It deliberately excludes benchmark jobs, transcripts, reports, credentials, archives, and binaries.
+The repository contains the runner, Iris Harbor adapter, token-efficiency analyzer, synthetic fixtures, tests, and four agent skills. It deliberately excludes benchmark jobs, transcripts, reports, credentials, archives, and binaries.
 
 ## What this measures
 
@@ -25,7 +25,21 @@ The analyzer reports:
 - [Harbor](https://github.com/laude-institute/harbor) with `harbor` on `PATH`, or a Harbor source checkout selected with `HARBOR_DIR`
 - Credentials for each harness you run
 
-The Iris adapter uploads a local glibc binary when `IRIS_BINARY_PATH` is set. Otherwise it downloads the latest x86_64 GNU/Linux Iris release inside each task container. Alpine/musl task images are not compatible with that binary.
+The Iris adapter uploads a local glibc binary when `IRIS_BINARY_PATH` is set. Otherwise it downloads the latest x86_64 GNU/Linux Iris release inside each task container. All Terminal-Bench 2.0 agent containers at the pinned dataset revision are glibc-based; a musl binary is needed only for other Alpine-based datasets.
+
+## First-run onboarding
+
+Open the cloned repository with Iris, Claude Code, Codex, or pi and ask to start a benchmark. When the ignored `.benchmark-setup` marker is absent, repository guidance invokes `benchmark-onboarding` before any token-spending run.
+
+The onboarding skill:
+
+- inventories Docker, Harbor, Iris, Claude Code, Codex, pi, authentication presence, and local Iris source builds;
+- asks which harnesses and which Iris build to use: latest published release, detected local developer checkout, installed binary, or custom binary;
+- validates private storage and concurrency;
+- runs install-only compatibility checks;
+- writes `.benchmark-setup` only after selected prerequisites pass.
+
+Invoke it explicitly with `$benchmark-onboarding` if your agent supports skill mentions. The marker contains paths and selections, never credentials, and `run-bench.sh` consumes it automatically. Environment variables still take precedence.
 
 ## Authentication
 
@@ -92,6 +106,7 @@ Pricing is time-sensitive. The analyzer states its pricing date and refuses to p
 
 Repository-scoped skills live under `.agents/skills/`:
 
+- `benchmark-onboarding`: inventory and configure a fresh checkout without model-token spend;
 - `harness-benchmark`: design, execute, analyze, and clean up a comparison;
 - `harness-telemetry`: source schemas and collection semantics;
 - `benchmark-telemetry-report`: rigorous analysis and self-contained reporting.

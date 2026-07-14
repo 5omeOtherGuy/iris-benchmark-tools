@@ -1,24 +1,35 @@
+import contextlib
+import importlib.util
+import io
 import json
 import os
 import stat
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parent
 SETUP = ROOT / ".agents" / "skills" / "benchmark-onboarding" / "scripts" / "setup.py"
+SPEC = importlib.util.spec_from_file_location("benchmark_onboarding_setup", SETUP)
+assert SPEC and SPEC.loader
+setup_module = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(setup_module)
 
 
 class BenchmarkOnboardingTests(unittest.TestCase):
     def run_setup(self, *args, env=None):
-        return subprocess.run(
-            ["python3", SETUP, *map(str, args)],
-            text=True,
-            capture_output=True,
-            env=env,
-            check=False,
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        environment = mock.patch.dict(os.environ, env or {}, clear=env is not None)
+        with environment, mock.patch.object(sys, "argv", [str(SETUP), *map(str, args)]):
+            with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                returncode = setup_module.main()
+        return subprocess.CompletedProcess(
+            [str(SETUP), *map(str, args)], returncode, stdout.getvalue(), stderr.getvalue()
         )
 
     def test_inspect_reports_harnesses_without_reading_credentials(self):
@@ -134,6 +145,22 @@ class BenchmarkOnboardingTests(unittest.TestCase):
         self.assertIn(f"--jobs-dir\n{jobs}\n", recorded)
         self.assertIn("--n-concurrent\n3\n", recorded)
         self.assertFalse((temp / "should-not-exist").exists())
+
+    def test_runner_rejects_marker_without_version(self):
+        with tempfile.TemporaryDirectory() as directory:
+            marker = Path(directory) / "setup"
+            marker.write_text("concurrency=3\n")
+            env = os.environ.copy()
+            env["BENCH_SETUP_FILE"] = str(marker)
+            result = subprocess.run(
+                [ROOT / "run-bench.sh"],
+                text=True,
+                capture_output=True,
+                env=env,
+                check=False,
+            )
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("missing version", result.stderr)
 
     def test_skill_wiring_and_first_run_trigger_are_present(self):
         skill = ROOT / ".agents" / "skills" / "benchmark-onboarding" / "SKILL.md"

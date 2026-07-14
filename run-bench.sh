@@ -9,8 +9,49 @@
 set -euo pipefail
 
 ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-JOBS_DIR="${BENCH_JOBS_DIR:-$ROOT_DIR/jobs}"
-CONCURRENCY="${HARNESS_BENCH_CONCURRENCY:-1}"
+SETUP_FILE="${BENCH_SETUP_FILE:-$ROOT_DIR/.benchmark-setup}"
+SETUP_JOBS_DIR=""
+SETUP_CONCURRENCY=""
+SETUP_HARBOR_DIR=""
+SETUP_IRIS_BINARY=""
+SETUP_VERSION_FOUND=false
+
+if [[ -L "$SETUP_FILE" ]]; then
+  echo "benchmark setup marker must not be a symlink: $SETUP_FILE" >&2
+  exit 2
+fi
+if [[ -f "$SETUP_FILE" ]]; then
+  if [[ $(wc -c < "$SETUP_FILE") -gt 8192 ]]; then
+    echo "benchmark setup marker is too large: $SETUP_FILE" >&2
+    exit 2
+  fi
+  while IFS='=' read -r key value; do
+    case "$key" in
+      version)
+        [[ "$value" == "1" ]] || { echo "unsupported benchmark setup version: $value" >&2; exit 2; }
+        SETUP_VERSION_FOUND=true
+        ;;
+      harnesses|iris_build) ;;
+      jobs_dir) SETUP_JOBS_DIR="$value" ;;
+      concurrency) SETUP_CONCURRENCY="$value" ;;
+      harbor_dir) SETUP_HARBOR_DIR="$value" ;;
+      iris_binary_path) SETUP_IRIS_BINARY="$value" ;;
+      "") ;;
+      *) echo "unknown benchmark setup key: $key" >&2; exit 2 ;;
+    esac
+  done < "$SETUP_FILE"
+  if [[ "$SETUP_VERSION_FOUND" != true ]]; then
+    echo "benchmark setup marker is missing version: $SETUP_FILE" >&2
+    exit 2
+  fi
+fi
+
+JOBS_DIR="${BENCH_JOBS_DIR:-${SETUP_JOBS_DIR:-$ROOT_DIR/jobs}}"
+CONCURRENCY="${HARNESS_BENCH_CONCURRENCY:-${SETUP_CONCURRENCY:-1}}"
+HARBOR_DIR="${HARBOR_DIR:-$SETUP_HARBOR_DIR}"
+if [[ -z "${IRIS_BINARY_PATH:-}" && -n "$SETUP_IRIS_BINARY" ]]; then
+  export IRIS_BINARY_PATH="$SETUP_IRIS_BINARY"
+fi
 export PATH="$HOME/.local/bin:$PATH"
 export PYTHONPATH="$ROOT_DIR${PYTHONPATH:+:$PYTHONPATH}"
 
