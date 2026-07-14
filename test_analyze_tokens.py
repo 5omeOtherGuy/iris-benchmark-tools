@@ -22,6 +22,47 @@ class TokenAnalyzerTests(unittest.TestCase):
         self.assertEqual(parsed["totals"]["tools"], 2)
         self.assertEqual(parsed["warnings"], [])
 
+    def test_real_emitter_v2_without_schema_version_is_not_downgraded(self):
+        # Reproduces actual src/print.rs output: no `schema_version` field, and
+        # a `totals` block using v1-style names (input_tokens, cache_*_input_*).
+        # Must be detected as v2 (populated timeline + base), not legacy.
+        with tempfile.TemporaryDirectory(dir=ROOT) as directory:
+            path = Path(directory) / "iris_usage.json"
+            path.write_text(json.dumps({
+                "provider": "anthropic",
+                "model": "claude-sonnet-5",
+                "base": {
+                    "system_prompt_tokens": 90,
+                    "tools": [{"name": "read", "schema_tokens": 10}],
+                    "tools_total_tokens": 10,
+                    "base_total_tokens": 100,
+                },
+                "turns": [
+                    {"i": 0, "fresh": 10, "cache_read": 80, "cache_write": 10,
+                     "output": 5, "reasoning": 0, "input_full": 100,
+                     "duration_ms": 100, "ttft_ms": 10, "stop_reason": "end_turn"},
+                ],
+                "tools": [{"i": 0, "turn": 0, "name": "read", "call_id": "c1"}],
+                # v1-style totals names, exactly as the emitter serializes them.
+                "totals": {
+                    "provider_turns": 1,
+                    "input_tokens": 100,
+                    "output_tokens": 5,
+                    "reasoning_output_tokens": 0,
+                    "cache_read_input_tokens": 80,
+                    "cache_write_input_tokens": 10,
+                    "tool_calls": 1,
+                },
+            }))
+            parsed = analyzer.parse_iris_usage(path)
+        self.assertIsNotNone(parsed)
+        self.assertEqual(parsed["schema_version"], 2)
+        self.assertFalse(parsed["legacy"])
+        self.assertEqual(len(parsed["turns"]), 1)
+        self.assertEqual(parsed["totals"]["input_full"], 100)
+        # v1-style totals reconcile with the timeline: no mismatch warnings.
+        self.assertEqual(parsed["warnings"], [])
+
     def test_legacy_iris_has_totals_but_no_timeline_or_cost(self):
         with tempfile.TemporaryDirectory(dir=ROOT) as directory:
             path = Path(directory) / "usage.json"
@@ -81,6 +122,38 @@ class TokenAnalyzerTests(unittest.TestCase):
         self.assertEqual(parsed["totals"]["output"], 20)
         self.assertFalse(any("does not match final_metrics" in warning for warning in parsed["warnings"]))
 
+    def test_cc_output_falls_back_to_atif_total_when_steps_dont_map_to_turns(self):
+        # Real failure mode: stream output_tokens sum is tiny (hidden reasoning
+        # omitted) and ATIF steps don't map 1:1 to deduped turns, so the exact
+        # per-step remap can't fire. Aggregate output must still equal the
+        # authoritative ATIF total, not the broken stream sum.
+        usage = {"input_tokens": 2, "cache_read_input_tokens": 80, "cache_creation_input_tokens": 18, "output_tokens": 5}
+        events = []
+        for idx in (1, 2):  # two turns from the stream
+            mid = f"m{idx}"
+            events.append({"type": "assistant", "message": {"id": mid, "usage": usage, "content": []}})
+            events.append({"type": "assistant", "message": {"id": mid, "usage": usage, "content": []}})
+        trajectory = {
+            "schema_version": "ATIF-v1.7",
+            "agent": {"model_name": "claude-sonnet-5"},
+            "steps": [{"source": "agent", "metrics": {"completion_tokens": 6558}}],  # 1 step != 2 turns
+            "final_metrics": {
+                "total_prompt_tokens": 2 * (2 + 80 + 18),
+                "total_completion_tokens": 6558,
+                "extra": {"total_cache_read_input_tokens": 160, "total_cache_creation_input_tokens": 36},
+            },
+        }
+        with tempfile.TemporaryDirectory(dir=ROOT) as directory:
+            trial = Path(directory)
+            agent = trial / "agent"
+            agent.mkdir()
+            (agent / "claude-code.txt").write_text("\n".join(json.dumps(e) for e in events))
+            (agent / "trajectory.json").write_text(json.dumps(trajectory))
+            parsed = analyzer.parse_cc_trial(trial)
+        self.assertEqual(parsed["totals"]["output"], 6558)  # not the stream sum (10)
+        self.assertFalse(any("does not match final_metrics" in w for w in parsed["warnings"]))
+        self.assertTrue(any("scaled to ATIF total_completion_tokens" in w for w in parsed["warnings"]))
+
     def test_cc_usage_deduplicates_usage_and_tools_by_message_and_call_id(self):
         usage = {"input_tokens": 2, "cache_read_input_tokens": 80, "cache_creation_input_tokens": 18, "output_tokens": 7}
         message_start = {"type": "assistant", "message": {"id": "m1", "usage": usage, "content": []}}
@@ -117,6 +190,29 @@ class TokenAnalyzerTests(unittest.TestCase):
         }
         analyzer.enrich_metrics(metrics)
         self.assertEqual(metrics["totals"]["input_beyond_base"], 150)
+
+    def test_steady_state_cache_read_excludes_cold_turn1(self):
+        # Cold turn 1 (all fresh+write, no read) drags the overall cache-read%
+        # down; turns 2..N are warm. Excluding turn 1 must jump to near-parity,
+        # demonstrating a cold-start artifact rather than a breakpoint problem.
+        metrics = {
+            "model": "unknown",
+            "legacy": False,
+            "base": {"base_total_tokens": 100},
+            "turns": [
+                {"fresh": 100, "cache_read": 0, "cache_write": 900, "output": 5, "input_full": 1000},
+                {"fresh": 20, "cache_read": 950, "cache_write": 30, "output": 5, "input_full": 1000},
+                {"fresh": 20, "cache_read": 950, "cache_write": 30, "output": 5, "input_full": 1000},
+            ],
+            "totals": {"turns": 3, "input_full": 3000},
+        }
+        analyzer.enrich_metrics(metrics)
+        self.assertAlmostEqual(metrics["totals"]["cache_read_pct"], 100 * 1900 / 3000)
+        self.assertAlmostEqual(metrics["totals"]["cache_read_pct_ex_turn1"], 95.0)
+        per_turn = [t["cache_read_pct"] for t in metrics["turns"]]
+        self.assertEqual(per_turn[0], 0.0)
+        self.assertAlmostEqual(per_turn[1], 95.0)
+        self.assertAlmostEqual(per_turn[2], 95.0)
 
     def test_cost_and_cold_normalization(self):
         rates = {"input": 2.0, "output": 10.0, "cache_write": 2.5, "cache_read": 0.2}
@@ -290,8 +386,11 @@ class TokenAnalyzerEndToEndTests(unittest.TestCase):
         first_iris = next(a for a in data["attempts"] if a["trial"] == "shared__i1")
         self.assertEqual(first_iris["metrics"]["totals"]["input_full"], 250)
         self.assertEqual(first_iris["metrics"]["totals"]["input_beyond_base"], 50)
-        self.assertAlmostEqual(first_iris["metrics"]["totals"]["cost_actual"], 0.000744)
-        self.assertAlmostEqual(first_iris["metrics"]["totals"]["cost_cold"], 0.00102)
+        # Sonnet-5 intro rates: fresh 30*$2 + read 180*$0.20 + write 40*$2.50 +
+        # output 15*$10 = $0.000346; cold re-prices turn-0 read (80) at write rate:
+        # +80*($2.50-$0.20) = +$0.000184 -> $0.000530.
+        self.assertAlmostEqual(first_iris["metrics"]["totals"]["cost_actual"], 0.000346)
+        self.assertAlmostEqual(first_iris["metrics"]["totals"]["cost_cold"], 0.000530)
 
         warnings = "\n".join(data["warnings"])
         self.assertIn("legacy iris usage report", warnings)

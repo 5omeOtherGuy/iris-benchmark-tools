@@ -1,30 +1,30 @@
 #!/usr/bin/env bash
-# Harness comparison runner (iris vs claude-code vs codex) on terminal-bench 2.0.
+# Run one Harbor benchmark leg. Run competing harnesses sequentially with the
+# same model and task-selection arguments for a controlled comparison.
 #
 # Usage:
-#   ./run-bench.sh iris        anthropic/claude-fable-5 [extra harbor args...]
-#   ./run-bench.sh claude-code anthropic/claude-fable-5 [extra harbor args...]
-#   ./run-bench.sh codex       openai/gpt-5.5-codex     [extra harbor args...]
-#
-# Defaults are tuned for this machine (7 GB RAM): 1 concurrent trial,
-# results under /mnt/bench/work/jobs (HDD-backed ext4).
+#   ./run-bench.sh iris        anthropic/claude-sonnet-5 [harbor args...]
+#   ./run-bench.sh claude-code anthropic/claude-sonnet-5 [harbor args...]
+#   ./run-bench.sh codex       openai/gpt-5.5-codex     [harbor args...]
 set -euo pipefail
-export PATH="$HOME/.local/bin:$PATH"
-cd "$(dirname "$0")"
-export PYTHONPATH="/mnt/bench/work${PYTHONPATH:+:$PYTHONPATH}"
 
-# Durable Claude Code OAuth token (from `claude setup-token`) for repeated
-# claude-code legs: sourced from secrets.env unless already set in the env, so
-# many legs reuse one token instead of minting per run. secrets.env is local
-# benchmark infra (this dir is not a git repo, so it is never committed); iris
-# legs do not need it (they auth from ~/.claude/.credentials.json). Explicit
-# `if` (not `&& source`) so a missing file does not trip `set -e`.
-if [[ -f secrets.env && -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]]; then
-  source secrets.env
+ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+JOBS_DIR="${BENCH_JOBS_DIR:-$ROOT_DIR/jobs}"
+CONCURRENCY="${HARNESS_BENCH_CONCURRENCY:-1}"
+export PATH="$HOME/.local/bin:$PATH"
+export PYTHONPATH="$ROOT_DIR${PYTHONPATH:+:$PYTHONPATH}"
+
+if [[ $# -lt 2 ]]; then
+  echo "usage: $0 <agent> <model> [harbor args...]" >&2
+  exit 2
+fi
+if [[ ! "$CONCURRENCY" =~ ^[1-9][0-9]*$ ]]; then
+  echo "HARNESS_BENCH_CONCURRENCY must be a positive integer" >&2
+  exit 2
 fi
 
-AGENT="${1:?agent (iris|claude-code|codex|...)}"
-MODEL="${2:?model (e.g. anthropic/claude-fable-5)}"
+AGENT="$1"
+MODEL="$2"
 shift 2
 
 case "$AGENT" in
@@ -32,24 +32,50 @@ case "$AGENT" in
 esac
 
 EXTRA_ENV=()
-# Codex CLI: reuse the host's ChatGPT OAuth instead of an API key.
 if [[ "$AGENT" == "codex" && -f "$HOME/.codex/auth.json" ]]; then
   EXTRA_ENV+=(--ae "CODEX_AUTH_JSON_PATH=$HOME/.codex/auth.json")
 fi
-# Claude Code: subscription OAuth token (from `claude setup-token`).
-if [[ "$AGENT" == "claude-code" && -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]]; then
-  EXTRA_ENV+=(--ae "CLAUDE_FORCE_OAUTH=1" --ae "CLAUDE_CODE_OAUTH_TOKEN=$CLAUDE_CODE_OAUTH_TOKEN")
+if [[ "$AGENT" == "claude-code" ]]; then
+  if [[ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]]; then
+    echo "CLAUDE_CODE_OAUTH_TOKEN is required; create it with 'claude setup-token'" >&2
+    exit 2
+  fi
+  EXTRA_ENV+=(
+    --ae "CLAUDE_FORCE_OAUTH=1"
+    --ae "CLAUDE_CODE_OAUTH_TOKEN=$CLAUDE_CODE_OAUTH_TOKEN"
+  )
 fi
 
-harbor run \
+mkdir -p "$JOBS_DIR"
+
+if [[ -n "${HARBOR_DIR:-}" ]]; then
+  if [[ ! -d "$HARBOR_DIR" ]]; then
+    echo "HARBOR_DIR is not a directory: $HARBOR_DIR" >&2
+    exit 2
+  fi
+  cd "$HARBOR_DIR"
+  if command -v uv >/dev/null 2>&1; then
+    HARBOR=(uv run harbor)
+  elif command -v harbor >/dev/null 2>&1; then
+    HARBOR=(harbor)
+  else
+    echo "Harbor is unavailable; install it or install uv for HARBOR_DIR" >&2
+    exit 127
+  fi
+elif command -v harbor >/dev/null 2>&1; then
+  HARBOR=(harbor)
+else
+  echo "Harbor is unavailable; put 'harbor' on PATH or set HARBOR_DIR" >&2
+  exit 127
+fi
+
+"${HARBOR[@]}" run \
   --dataset terminal-bench@2.0 \
   --agent "$AGENT" \
   --model "$MODEL" \
-  --n-concurrent 1 \
-  --jobs-dir /mnt/bench/work/jobs \
+  --n-concurrent "$CONCURRENCY" \
+  --jobs-dir "$JOBS_DIR" \
   "${EXTRA_ENV[@]}" \
   "$@"
 
-echo
-echo "Results in /mnt/bench/work/jobs. Reclaim docker space when done comparing:"
-echo "  docker system prune -af --volumes"
+printf '\nResults: %s\n' "$JOBS_DIR"

@@ -21,18 +21,21 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
-# VERIFY/UPDATE as of 2026-07-13. Rates are USD per million tokens.
-# cache_write/cache_read intentionally derive from input so editing one input
-# rate preserves the requested 1.25x/0.10x relationship.
+# Rates are USD per million tokens. Verified against platform.claude.com/docs
+# pricing on 2026-07-14. cache_write is the 5m rate (1.25x input); iris/cc both
+# use 5m ephemeral caching by default (confirmed cache_creation_1h == 0 in runs).
+# cache_read = 0.10x input.
+#
+# Claude Sonnet 5 has INTRODUCTORY pricing ($2/$10) through 2026-08-31, then
+# STANDARD ($3/$15) from 2026-09-01. The active table below is the intro rates,
+# correct for all runs to date; flip to the standard block for runs on/after
+# 2026-09-01 (or make this date-aware if a re-run straddles the transition).
+_SONNET5_INTRO = {"input": 2.00, "output": 10.00, "cache_write": 2.00 * 1.25, "cache_read": 2.00 * 0.10}
+_SONNET5_STANDARD = {"input": 3.00, "output": 15.00, "cache_write": 3.00 * 1.25, "cache_read": 3.00 * 0.10}
 PRICING = {
-    "claude-sonnet-5": {
-        "input": 3.00,
-        "output": 30.00,
-        "cache_write": 3.00 * 1.25,
-        "cache_read": 3.00 * 0.10,
-    }
+    "claude-sonnet-5": _SONNET5_INTRO,
 }
-PRICING_AS_OF = "2026-07-13 (VERIFY/UPDATE)"
+PRICING_AS_OF = "2026-07-14 (Sonnet 5 intro rates, valid through 2026-08-31)"
 HIGH_VARIANCE_CV = 0.20
 
 Number = int | float
@@ -114,7 +117,13 @@ def parse_iris_usage(path: Path) -> dict[str, Any] | None:
 
     warnings: list[str] = []
     schema = usage.get("schema_version")
-    if schema not in (2, "2", "v2"):
+    raw_turns = usage.get("turns")
+    # The emitter does not stamp `schema_version` (see src/print.rs UsageReport),
+    # so detect v2 structurally by its per-turn timeline + base decomposition.
+    # Without this, a genuine v2 report is silently downgraded to the totals-only
+    # legacy path, discarding everything v2 exists to provide.
+    has_v2_shape = isinstance(raw_turns, list) and isinstance(usage.get("base"), dict)
+    if schema not in (2, "2", "v2") and not has_v2_shape:
         warnings.append("legacy iris usage report: totals only; per-turn/base/cost unavailable")
         totals = {
             "turns": usage.get("provider_turns"),
@@ -138,7 +147,6 @@ def parse_iris_usage(path: Path) -> dict[str, Any] | None:
             "warnings": warnings,
         }
 
-    raw_turns = usage.get("turns")
     raw_tools = usage.get("tools")
     if not isinstance(raw_turns, list) or not isinstance(raw_tools, list):
         warnings.append("invalid iris v2 report: turns/tools must be arrays")
@@ -159,9 +167,24 @@ def parse_iris_usage(path: Path) -> dict[str, Any] | None:
     normalized_base["base_total_tokens"] = base_total
     totals = totals_from_turns(turns, tools)
     reported = usage.get("totals") if isinstance(usage.get("totals"), dict) else {}
-    for key in ("fresh", "cache_read", "cache_write", "input_full", "output", "reasoning"):
-        if isinstance(reported.get(key), (int, float)) and totals[key] != reported[key]:
-            warnings.append(f"iris totals.{key} mismatch: timeline={totals[key]} reported={reported[key]}")
+    # The emitter's `totals` block uses v1-style names (input_tokens,
+    # cache_read_input_tokens, ...); the frozen v2 fixture uses the per-turn
+    # names. Accept either so the cross-check actually fires against real output.
+    recon_aliases = {
+        "fresh": ("fresh",),
+        "cache_read": ("cache_read", "cache_read_input_tokens"),
+        "cache_write": ("cache_write", "cache_write_input_tokens"),
+        "input_full": ("input_full", "input_tokens"),
+        "output": ("output", "output_tokens"),
+        "reasoning": ("reasoning", "reasoning_output_tokens"),
+    }
+    for key, aliases in recon_aliases.items():
+        for alias in aliases:
+            value = reported.get(alias)
+            if isinstance(value, (int, float)):
+                if totals[key] != value:
+                    warnings.append(f"iris totals.{key} mismatch: timeline={totals[key]} reported={value}")
+                break
     return {
         "schema_version": 2,
         "provider": usage.get("provider"),
@@ -274,15 +297,33 @@ def parse_cc_trial(trial_dir: Path) -> dict[str, Any] | None:
     expected = expected_cc_totals(final_metrics)
     observed = totals_from_turns(turns, tools)
 
-    # Claude Code 2.1.207's stream omits hidden reasoning from output_tokens.
-    # ATIF step metrics are authoritative when they map one-to-one to turns.
+    # Claude Code's stream omits hidden reasoning from output_tokens, so the
+    # per-turn stream sum undercounts (observed 10 vs ATIF 6558 in real trials).
+    # ATIF total_completion_tokens is authoritative. Prefer an exact per-step
+    # remap when steps map 1:1 to turns; otherwise scale the aggregate to the
+    # ATIF total so cost is never computed off the broken stream sum.
     agent_steps = [s for s in trajectory.get("steps", []) if isinstance(s, dict) and s.get("source") == "agent"]
-    if observed["output"] != expected["output"] and len(agent_steps) == len(turns):
+    if observed["output"] != expected["output"] and expected["output"] > 0 and turns:
         step_outputs = [number((s.get("metrics") or {}).get("completion_tokens")) for s in agent_steps]
-        if sum(step_outputs) == expected["output"]:
+        if len(agent_steps) == len(turns) and sum(step_outputs) == expected["output"]:
             for turn, output in zip(turns, step_outputs):
                 turn["output"] = output
             warnings.append("Claude Code stream output omitted hidden tokens; used ATIF per-step completion_tokens")
+        else:
+            # No 1:1 mapping: distribute the ATIF total across turns in
+            # proportion to their stream output (even split if all zero), fixing
+            # rounding drift onto the last turn so the aggregate matches exactly.
+            stream_out = [number(t["output"]) for t in turns]
+            total_stream = sum(stream_out)
+            if total_stream > 0:
+                alloc = [round(expected["output"] * o / total_stream) for o in stream_out]
+            else:
+                even = expected["output"] // len(turns)
+                alloc = [even] * len(turns)
+            alloc[-1] += expected["output"] - sum(alloc)
+            for turn, output in zip(turns, alloc):
+                turn["output"] = output
+            warnings.append("Claude Code stream output sum unreliable; scaled to ATIF total_completion_tokens")
     observed = totals_from_turns(turns, tools)
     mismatches = [key for key in expected if observed[key] != expected[key]]
     if mismatches:
@@ -327,6 +368,18 @@ def calculate_cost(turns: list[dict[str, Any]], rates: dict[str, float]) -> tupl
     return actual / 1_000_000, cold / 1_000_000
 
 
+def cache_read_pct(turns: list[dict[str, Any]]) -> float | None:
+    """Cache-read share of input over the given turns, or None if no input.
+
+    Passing turns[1:] excludes the cold turn-1 cache write, isolating
+    steady-state reuse — the metric that separates a genuine cache-breakpoint
+    problem (stays low with turn 1 removed) from a cold-start artifact (jumps
+    to near-parity once the one-time cold write is dropped)."""
+    read = sum(number(t.get("cache_read")) for t in turns)
+    full = sum(number(t.get("input_full")) for t in turns)
+    return 100 * read / full if full else None
+
+
 def enrich_metrics(metrics: dict[str, Any]) -> None:
     totals = metrics["totals"]
     turns = totals.get("turns")
@@ -336,6 +389,13 @@ def enrich_metrics(metrics: dict[str, Any]) -> None:
         totals["input_beyond_base"] = totals["input_full"] - base_total * turns
     else:
         totals["input_beyond_base"] = None
+    timeline = metrics.get("turns") or []
+    totals["cache_read_pct"] = cache_read_pct(timeline)
+    totals["cache_read_pct_ex_turn1"] = cache_read_pct(timeline[1:]) if len(timeline) > 1 else None
+    # Per-turn cache-read share, so the cold-turn-1 -> warm-tail pattern is
+    # visible directly rather than inferred from aggregates.
+    for turn in timeline:
+        turn["cache_read_pct"] = cache_read_pct([turn])
     rates = pricing_for(metrics.get("model"))
     if not metrics.get("legacy") and metrics.get("turns") and rates:
         actual, cold = calculate_cost(metrics["turns"], rates)
