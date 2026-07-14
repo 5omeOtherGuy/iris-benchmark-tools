@@ -46,6 +46,28 @@ class BenchmarkOnboardingTests(unittest.TestCase):
         self.assertIn("claude_credentials", report["credential_presence"])
         self.assertIsInstance(report["credential_presence"]["claude_credentials"], bool)
 
+    def test_inspect_honors_explicit_credential_paths_without_reading_them(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            claude_credentials = root / "claude.json"
+            iris_auth = root / "iris.json"
+            codex_auth = root / "codex.json"
+            for path in (claude_credentials, iris_auth, codex_auth):
+                path.write_text("not inspected")
+            env = {
+                "HOME": str(root),
+                "PATH": os.environ["PATH"],
+                "IRIS_CLAUDE_CREDENTIALS_PATH": str(claude_credentials),
+                "IRIS_AUTH_JSON_PATH": str(iris_auth),
+                "CODEX_AUTH_JSON_PATH": str(codex_auth),
+            }
+            result = self.run_setup("inspect", "--repo", root, env=env)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        presence = json.loads(result.stdout)["credential_presence"]
+        self.assertTrue(presence["claude_credentials"])
+        self.assertTrue(presence["iris_auth"])
+        self.assertTrue(presence["codex_auth"])
+
     def test_configure_writes_non_secret_marker_atomically(self):
         with tempfile.TemporaryDirectory() as directory:
             repo = Path(directory)
