@@ -1,58 +1,129 @@
-# Harness benchmarking workspace (terminal-bench 2.0 via Harbor)
+# Iris Benchmark Tools
 
-Compare iris-agent against other harnesses (Claude Code, Codex CLI, ...) on
-identical tasks. Everything heavy lives on the HDD-backed ext4 mount
-`/mnt/bench` (loop image at `/mnt/Data/iris-bench/bench.img`, in fstab):
+Run controlled coding-agent comparisons with [Harbor](https://github.com/laude-institute/harbor), Terminal-Bench 2.0, Iris, and Harbor's built-in harnesses.
 
-- `/mnt/bench/docker` — Docker data-root (images/containers)
-- `/mnt/bench/cache/sccache` — sccache (moved off the SSD)
-- `/mnt/bench/work` — this workspace (adapter, jobs, assets)
+The repository contains the runner, Iris Harbor adapter, token-efficiency analyzer, synthetic fixtures, tests, and three agent skills. It deliberately excludes benchmark jobs, transcripts, reports, credentials, archives, and binaries.
 
-## Layout
+## What this measures
 
-- `agents/iris_installed.py` — Harbor installed-agent adapter for iris.
-  Uploads `assets/.../iris` + credentials into the task container, writes a
-  minimal `~/.iris/settings.json`, runs
-  `iris -p <instruction> --approve --dangerously-skip-permissions`.
-- `assets/` — iris release binary (refresh: re-download the
-  `x86_64-unknown-linux-gnu` tarball from GitHub releases after a new release).
-- `run-bench.sh` — runner with machine-tuned defaults (`--n-concurrent 1`).
-- `jobs/` — results (one dir per `--job-name`; `result.json` + per-trial logs).
+Use the same provider model and task set across harnesses to isolate harness behavior. Product comparisons with different models are also possible, but model and harness effects are then confounded.
 
-## Auth
+The analyzer reports:
 
-- **iris (anthropic/...)**: uploads host `~/.claude/.credentials.json` — iris
-  bootstraps its Anthropic OAuth from Claude Code's credentials. No setup.
-- **iris (openai-codex/...)**: uploads host `~/.iris/auth.json`. No setup.
-- **claude-code**: needs `CLAUDE_CODE_OAUTH_TOKEN` — run `claude setup-token`
-  once and export it (the runner then passes `CLAUDE_FORCE_OAUTH=1`).
-- **codex**: uses host `~/.codex/auth.json` automatically (ChatGPT OAuth).
+- task success and failures;
+- provider turns and tool calls;
+- fresh, cache-read, cache-write, full-input, output, and reasoning tokens;
+- observed and cold-normalized API-equivalent cost;
+- fixed-prefix-netted input where supported;
+- per-attempt and task-balanced aggregates;
+- parser warnings and telemetry exclusions.
 
-Caveat: two harnesses sharing one OAuth credential can race on token refresh.
-Run matchups sequentially (the default), not simultaneously.
+## Prerequisites
 
-## Typical matchup (same model, ~5 tasks)
+- Linux with Docker
+- Python 3.10 or newer
+- [Harbor](https://github.com/laude-institute/harbor) with `harbor` on `PATH`, or a Harbor source checkout selected with `HARBOR_DIR`
+- Credentials for each harness you run
+
+The Iris adapter uploads a local glibc binary when `IRIS_BINARY_PATH` is set. Otherwise it downloads the latest x86_64 GNU/Linux Iris release inside each task container. Alpine/musl task images are not compatible with that binary.
+
+## Authentication
+
+Keep credentials outside this repository. Export only the variables needed for the current shell:
 
 ```bash
-cd /mnt/bench/work
-./run-bench.sh iris        anthropic/claude-fable-5 -l 5 -y --job-name iris-smoke
-./run-bench.sh claude-code anthropic/claude-fable-5 -l 5 -y --job-name cc-smoke
-harbor view /mnt/bench/work/jobs
+# Claude Code harness: value created interactively by `claude setup-token`
+export CLAUDE_CODE_OAUTH_TOKEN="<token>"
+
+# Optional Iris credential overrides; these default to the normal user paths.
+export IRIS_CLAUDE_CREDENTIALS_PATH="$HOME/.claude/.credentials.json"
+export IRIS_AUTH_JSON_PATH="$HOME/.iris/auth.json"
+
+# Optional local Iris build instead of the latest release.
+export IRIS_BINARY_PATH="$HOME/src/iris-agent/target/release/iris"
 ```
 
-`-l N` takes the first N tasks (same set for both runs); `-i '<glob>'` /
-`-x '<glob>'` include/exclude tasks by name; drop `-l` for the full ~89 tasks.
+Never put token values, credential JSON, or shell files containing secrets in this checkout. Benchmark transcripts can also capture sensitive tool output; treat the complete `jobs/` tree as private.
 
-## Cleanup
+## Run a comparison
 
-- Between runs of one comparison: keep images (they're shared per task).
-- After a comparison: `docker system prune -af --volumes` (all on /mnt/bench).
-- The loop image is sparse: it only occupies real HDD space for data written.
-  To shrink after big deletions: `fstrim /mnt/bench`.
-- Old jobs: archive/delete dirs under `jobs/`.
+From the repository root:
 
-## Resource notes (this machine)
+```bash
+# Controlled comparison: same model, same tasks, sequential legs.
+./run-bench.sh iris anthropic/claude-sonnet-5 \
+  -i '<task-glob>' -k 2 -y --job-name iris__pilot
 
-- 7 GB RAM → `--n-concurrent 1` (2 at most). SSD stays untouched by runs.
-- For big/parallel runs later: Harbor supports cloud sandboxes
-  (`--env daytona|modal|e2b`), zero local Docker.
+./run-bench.sh claude-code anthropic/claude-sonnet-5 \
+  -i '<task-glob>' -k 2 -y --job-name cc__pilot
+```
+
+The runner defaults to:
+
+- dataset `terminal-bench@2.0`;
+- one concurrent trial;
+- output under `./jobs`.
+
+Override these without editing the script:
+
+```bash
+export BENCH_JOBS_DIR=/data/private-bench/jobs
+export HARNESS_BENCH_CONCURRENCY=2
+export HARBOR_DIR=$HOME/src/harbor   # only needed for a source checkout
+```
+
+Run contenders sequentially when they share credentials or the host is memory-constrained. Record exact harness, model, Harbor, and dataset versions with every result.
+
+## Analyze token efficiency
+
+```bash
+python3 analyze_tokens.py \
+  "$BENCH_JOBS_DIR/iris__pilot" \
+  "$BENCH_JOBS_DIR/cc__pilot" \
+  -o comparison.md \
+  --json comparison.json
+```
+
+If `BENCH_JOBS_DIR` is unset, replace it with `jobs`. The comparison includes token/cost aggregates only for tasks solved at least once by both harnesses; failed attempts and exclusions remain visible. Read parser warnings before drawing conclusions.
+
+Pricing is time-sensitive. The analyzer states its pricing date and refuses to price unknown models rather than guessing.
+
+## Agent skills
+
+Repository-scoped skills live under `.agents/skills/`:
+
+- `harness-benchmark`: design, execute, analyze, and clean up a comparison;
+- `harness-telemetry`: source schemas and collection semantics;
+- `benchmark-telemetry-report`: rigorous analysis and self-contained reporting.
+
+Claude Code discovers the same canonical files through relative links in `.claude/skills/`. Agents that support `.agents/skills/` discover them directly. There is only one copy of each skill.
+
+## Validate changes
+
+```bash
+python3 -m unittest -v
+bash -n run-bench.sh scripts/check-no-secrets.sh
+./scripts/check-no-secrets.sh --history
+```
+
+The repository uses a fail-safe `.gitignore`: root files are ignored unless explicitly reviewed and allowlisted. Add an exception only for source, documentation, synthetic fixtures, or tests that are safe to publish.
+
+## Data policy
+
+Safe to publish:
+
+- source code and documentation;
+- synthetic telemetry fixtures;
+- tests and empty configuration examples.
+
+Do not publish:
+
+- `jobs/`, session transcripts, agent logs, or generated reports derived from real tasks;
+- OAuth tokens, API keys, credential stores, or environment files;
+- downloaded binaries, archives, container state, or private task assets.
+
+See [SECURITY.md](SECURITY.md) for reporting and response guidance.
+
+## License
+
+Licensed under either the Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE)) or the MIT License ([LICENSE](LICENSE)), at your option.

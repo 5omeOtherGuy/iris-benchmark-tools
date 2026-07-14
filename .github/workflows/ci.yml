@@ -1,0 +1,25 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Test
+        run: python3 -m unittest -v
+      - name: Check shell syntax
+        run: bash -n run-bench.sh scripts/check-no-secrets.sh
+      - name: Scan tracked history
+        run: ./scripts/check-no-secrets.sh --history

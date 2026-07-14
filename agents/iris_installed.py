@@ -5,10 +5,8 @@ Runs iris in headless print mode (`iris -p <instruction> --approve
 
 Host-side configuration (environment variables, all optional):
   IRIS_BINARY_PATH            Path to a local x86_64-linux-gnu `iris` binary to
-                              upload into the container. Default:
-                              /mnt/bench/work/assets/iris-agent-x86_64-unknown-linux-gnu/iris
-                              If the file does not exist, the adapter downloads
-                              the latest GitHub release inside the container.
+                              upload into the container. If unset, the adapter
+                              downloads the latest GitHub release in the container.
   IRIS_CLAUDE_CREDENTIALS_PATH  Claude Code credentials file to upload; iris
                               bootstraps its Anthropic OAuth from it. Default:
                               ~/.claude/.credentials.json
@@ -36,9 +34,6 @@ _RELEASE_URL = (
     "https://github.com/5omeOtherGuy/iris-agent/releases/latest/download/"
     "iris-agent-x86_64-unknown-linux-gnu.tar.gz"
 )
-_DEFAULT_BINARY = Path(
-    "/mnt/bench/work/assets/iris-agent-x86_64-unknown-linux-gnu/iris"
-)
 _OUTPUT_FILENAME = "iris.txt"
 # End-of-run token/cache/tool accounting emitted by iris `-p` when
 # IRIS_USAGE_JSON is set. Written into the preserved agent dir so it survives
@@ -62,10 +57,13 @@ class Iris(BaseInstalledAgent):
         return "iris --version 2>/dev/null || true"
 
     def _host_binary(self) -> Path | None:
-        path = Path(
-            self._get_env("IRIS_BINARY_PATH") or _DEFAULT_BINARY
-        ).expanduser()
-        return path if path.is_file() else None
+        configured = self._get_env("IRIS_BINARY_PATH")
+        if not configured:
+            return None
+        path = Path(configured).expanduser()
+        if not path.is_file():
+            raise ValueError(f"IRIS_BINARY_PATH is not a file: {path}")
+        return path
 
     @override
     async def install(self, environment: BaseEnvironment) -> None:
@@ -149,7 +147,7 @@ class Iris(BaseInstalledAgent):
         for host_path, tmp_path, _ in uploads:
             await environment.upload_file(host_path, tmp_path)
             await self.exec_as_root(
-                environment, command=f"chmod 644 {shlex.quote(tmp_path)}"
+                environment, command=f"chmod 600 {shlex.quote(tmp_path)}"
             )
 
         setup = "mkdir -p $HOME/.iris $HOME/.claude\n"
