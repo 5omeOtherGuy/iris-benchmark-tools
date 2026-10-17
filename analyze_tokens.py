@@ -21,21 +21,19 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
-# Rates are USD per million tokens. Verified against platform.claude.com/docs
-# pricing on 2026-07-14. cache_write is the 5m rate (1.25x input); iris/cc both
-# use 5m ephemeral caching by default (confirmed cache_creation_1h == 0 in runs).
+# Rates are USD per million tokens, verified against
+# platform.claude.com/docs/en/about-claude/pricing on PRICING_AS_OF.
+# cache_write is the 5m rate (1.25x input); iris/cc both use 5m ephemeral
+# caching by default (confirmed cache_creation_1h == 0 in runs).
 # cache_read = 0.10x input.
 #
-# Claude Sonnet 5 has INTRODUCTORY pricing ($2/$10) through 2026-08-31, then
-# STANDARD ($3/$15) from 2026-09-01. The active table below is the intro rates,
-# correct for all runs to date; flip to the standard block for runs on/after
-# 2026-09-01 (or make this date-aware if a re-run straddles the transition).
-_SONNET5_INTRO = {"input": 2.00, "output": 10.00, "cache_write": 2.00 * 1.25, "cache_read": 2.00 * 0.10}
-_SONNET5_STANDARD = {"input": 3.00, "output": 15.00, "cache_write": 3.00 * 1.25, "cache_read": 3.00 * 0.10}
+# Claude Sonnet 5 launched with $2/$10 announced as introductory pricing through
+# 2026-08-31. Anthropic made it the standard price and cancelled the scheduled
+# move to $3/$15, so one table is correct for runs on either side of that date.
 PRICING = {
-    "claude-sonnet-5": _SONNET5_INTRO,
+    "claude-sonnet-5": {"input": 2.00, "output": 10.00, "cache_write": 2.00 * 1.25, "cache_read": 2.00 * 0.10},
 }
-PRICING_AS_OF = "2026-07-14 (Sonnet 5 intro rates, valid through 2026-08-31)"
+PRICING_AS_OF = "2026-10-17"
 HIGH_VARIANCE_CV = 0.20
 
 Number = int | float
@@ -546,7 +544,10 @@ def build_report(data: dict[str, Any]) -> str:
         "",
         f"- Iris job: `{data['iris_job']}`",
         f"- Claude Code job: `{data['claude_code_job']}`",
-        f"- Pricing: USD/Mtok, {PRICING_AS_OF}; claude-sonnet-5 input $3.00, output $30.00, cache-write 1.25x input, cache-read 0.10x input.",
+        f"- Pricing: USD/Mtok, verified {data['pricing_as_of']}; " + "; ".join(
+            f"{model} input ${r['input']:.2f}, output ${r['output']:.2f}, cache-write ${r['cache_write']:.2f}, cache-read ${r['cache_read']:.2f}"
+            for model, r in sorted(data["pricing"].items())
+        ) + ".",
         "- Token/cost comparisons include solved attempts only, and only tasks with at least one solved attempt on both harnesses.",
         "",
     ]

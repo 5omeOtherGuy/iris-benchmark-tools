@@ -386,7 +386,13 @@ class TokenAnalyzerEndToEndTests(unittest.TestCase):
         first_iris = next(a for a in data["attempts"] if a["trial"] == "shared__i1")
         self.assertEqual(first_iris["metrics"]["totals"]["input_full"], 250)
         self.assertEqual(first_iris["metrics"]["totals"]["input_beyond_base"], 50)
-        # Sonnet-5 intro rates: fresh 30*$2 + read 180*$0.20 + write 40*$2.50 +
+        # The header states the rates actually applied. $2/$10 stayed Sonnet 5's
+        # standard price after 2026-08-31; the announced $3/$15 never took effect.
+        self.assertIn(
+            "claude-sonnet-5 input $2.00, output $10.00, cache-write $2.50, cache-read $0.20.",
+            report.splitlines()[4],
+        )
+        # Sonnet-5 rates: fresh 30*$2 + read 180*$0.20 + write 40*$2.50 +
         # output 15*$10 = $0.000346; cold re-prices turn-0 read (80) at write rate:
         # +80*($2.50-$0.20) = +$0.000184 -> $0.000530.
         self.assertAlmostEqual(first_iris["metrics"]["totals"]["cost_actual"], 0.000346)
