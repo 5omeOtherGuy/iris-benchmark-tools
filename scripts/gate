@@ -17,12 +17,14 @@ run() {
 }
 
 if ! "$python" -c 'import harbor' 2>/dev/null; then
-  echo "gate: Harbor is not installed for $python; run: $python -m pip install -r requirements-harbor.txt" >&2
+  echo "gate: Harbor is not installed for $python; run .agents/setup, or python3 -m pip install -r requirements-harbor.txt" >&2
   exit 1
 fi
 
 run "unit tests" "$python" -m unittest
-run "shell syntax" bash -n run-bench.sh scripts/check-no-secrets.sh scripts/gate .agents/setup
+for script in run-bench.sh scripts/check-no-secrets.sh scripts/gate .agents/setup; do
+  run "shell syntax: $script" bash -n "$script"
+done
 run "Iris adapter import" "$python" -c "import tempfile; from pathlib import Path
 from agents.iris_installed import Iris
 with tempfile.TemporaryDirectory() as logs:
