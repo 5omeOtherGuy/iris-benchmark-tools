@@ -92,7 +92,7 @@ httpx==0.28.1
     #   supabase
     #   supabase-auth
     #   supabase-functions
-huggingface-hub==1.33.0
+huggingface-hub==2.2.0
     # via
     #   litellm
     #   tokenizers
