@@ -182,3 +182,7 @@ bash -n run-bench.sh scripts/check-no-secrets.sh
 ```
 
 Before publishing a toolkit change, inspect `git status`, the staged diff, and the complete tracked path list.
+
+## License
+
+[MIT](LICENSE).
