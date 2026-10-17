@@ -21,12 +21,12 @@ This repository contains publishable benchmark tooling, not benchmark data.
 
 ## Verification
 
-Before committing:
+Before committing, run the gate. CI runs the same command in the job `gate`:
 
 ```bash
-python3 -m unittest -v
-bash -n run-bench.sh scripts/check-no-secrets.sh
-./scripts/check-no-secrets.sh --history
+scripts/gate
 ```
+
+It runs the unit tests, `bash -n` on the shell scripts, an import check of the Iris adapter against the locked Harbor, and `./scripts/check-no-secrets.sh --history`. It needs Harbor from `requirements-harbor.txt`; `.agents/setup` installs it in `.venv`, which the gate uses when present.
 
 Before publishing, inspect `git status`, `git diff --cached`, and the complete tracked path list.

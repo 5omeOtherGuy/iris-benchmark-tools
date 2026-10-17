@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# Run every check a change must pass. CI runs exactly this command.
+# Needs Harbor from requirements-harbor.txt; .agents/setup installs it in .venv.
+set -euo pipefail
+cd "$(dirname -- "$0")/.."
+
+python=python3
+[[ -x .venv/bin/python ]] && python=.venv/bin/python
+
+run() {
+  local name="$1" output
+  shift
+  if ! output="$("$@" 2>&1)"; then
+    printf 'gate: %s failed\n%s\n' "$name" "$output" >&2
+    exit 1
+  fi
+}
+
+if ! "$python" -c 'import harbor' 2>/dev/null; then
+  echo "gate: Harbor is not installed for $python; run: $python -m pip install -r requirements-harbor.txt" >&2
+  exit 1
+fi
+
+run "unit tests" "$python" -m unittest
+run "shell syntax" bash -n run-bench.sh scripts/check-no-secrets.sh scripts/gate .agents/setup
+run "Iris adapter import" "$python" -c "import tempfile; from pathlib import Path
+from agents.iris_installed import Iris
+with tempfile.TemporaryDirectory() as logs:
+    Iris(logs_dir=Path(logs), model_name='anthropic/claude-sonnet-5')"
+run "secret scan" ./scripts/check-no-secrets.sh --history

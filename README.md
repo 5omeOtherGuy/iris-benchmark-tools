@@ -176,10 +176,11 @@ For Claude Code, tell the user to run `claude setup-token` interactively and exp
 ## Validate toolkit changes
 
 ```bash
-python3 -m unittest -v
-bash -n run-bench.sh scripts/check-no-secrets.sh
-./scripts/check-no-secrets.sh --history
+python3 -m pip install -r requirements-harbor.txt   # or .agents/setup in an orb
+scripts/gate
 ```
+
+The gate runs the tests, shell syntax checks, an Iris adapter import check, and the history secret scan. CI runs it in the job `gate`. Run one test module with `python3 -m unittest test_analyze_tokens -v`.
 
 Before publishing a toolkit change, inspect `git status`, the staged diff, and the complete tracked path list.
 
