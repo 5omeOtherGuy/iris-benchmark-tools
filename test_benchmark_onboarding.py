@@ -25,7 +25,9 @@ class BenchmarkOnboardingTests(unittest.TestCase):
         stdout = io.StringIO()
         stderr = io.StringIO()
         environment = mock.patch.dict(os.environ, env or {}, clear=env is not None)
-        with environment, mock.patch.object(sys, "argv", [str(SETUP), *map(str, args)]):
+        # Never execute host CLIs (docker info, harness --version) from tests.
+        probe = mock.patch.object(setup_module, "first_line", return_value="stub 1.0")
+        with environment, probe, mock.patch.object(sys, "argv", [str(SETUP), *map(str, args)]):
             with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
                 returncode = setup_module.main()
         return subprocess.CompletedProcess(
@@ -34,7 +36,8 @@ class BenchmarkOnboardingTests(unittest.TestCase):
 
     def test_inspect_reports_harnesses_without_reading_credentials(self):
         with tempfile.TemporaryDirectory() as directory:
-            result = self.run_setup("inspect", "--repo", directory)
+            env = {"HOME": directory, "PATH": os.environ["PATH"]}
+            result = self.run_setup("inspect", "--repo", directory, env=env)
         self.assertEqual(result.returncode, 0, result.stderr)
         report = json.loads(result.stdout)
         self.assertEqual(report["repo"], str(Path(directory).resolve()))
@@ -144,7 +147,9 @@ class BenchmarkOnboardingTests(unittest.TestCase):
                 "harbor_dir=\n"
                 f"iris_binary_path={iris_binary}\n"
             )
-            env = os.environ.copy()
+            # Start from an empty environment so a host HARBOR_DIR,
+            # BENCH_* or HARNESS_BENCH_* setting cannot change the result.
+            env = {"PATH": os.environ["PATH"]}
             env.update(
                 {
                     "BENCH_SETUP_FILE": str(marker),
@@ -179,9 +184,12 @@ class BenchmarkOnboardingTests(unittest.TestCase):
             fake_harbor.chmod(0o755)
             auth = temp / "custom-codex-auth.json"
             auth.write_text("not inspected")
-            env = os.environ.copy()
+            # Start from an empty environment so a host HARBOR_DIR,
+            # BENCH_* or HARNESS_BENCH_* setting cannot change the result.
+            env = {"PATH": os.environ["PATH"]}
             env.update(
                 {
+                    "BENCH_SETUP_FILE": str(temp / "no-setup"),
                     "CAPTURE": str(capture),
                     "CODEX_AUTH_JSON_PATH": str(auth),
                     "HOME": str(temp / "home"),
