@@ -57,13 +57,15 @@ check_content() {
   local label="$1"
   local tree="$2"
   local matches status=0
+  # Report locations and match counts only: printing the line would put a
+  # found credential into the (public) CI log.
   if [[ "$tree" == --cached ]]; then
-    matches="$(git grep --cached -I -n -E "$CONTENT_PATTERN" -- .)" || status=$?
+    matches="$(git grep --cached -I -c -E "$CONTENT_PATTERN" -- .)" || status=$?
   else
-    matches="$(git grep -I -n -E "$CONTENT_PATTERN" "$tree" -- .)" || status=$?
+    matches="$(git grep -I -c -E "$CONTENT_PATTERN" "$tree" -- .)" || status=$?
   fi
   if [[ $status -eq 0 ]]; then
-    echo "secret scan: possible credential content in $label:" >&2
+    echo "secret scan: possible credential content in $label (path:matching lines):" >&2
     printf '%s\n' "$matches" >&2
     return 1
   fi

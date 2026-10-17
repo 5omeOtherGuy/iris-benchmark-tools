@@ -58,16 +58,16 @@ class RepositorySecurityTests(unittest.TestCase):
     def test_scanner_rejects_credential_content(self):
         temporary, root = self.make_repo()
         self.addCleanup(temporary.cleanup)
-        key_prefix = "s" + "k-proj-"
-        (root / "config.txt").write_text(
-            "OPENAI_API_KEY=" + key_prefix + "abcdefghijklmnopqrstuvwxyz012345\n"
-        )
+        key = "s" + "k-proj-" + "abcdefghijklmnopqrstuvwxyz012345"
+        (root / "config.txt").write_text("OPENAI_API_KEY=" + key + "\n")
         subprocess.run(["git", "-C", root, "add", "config.txt"], check=True)
 
         result = self.run_scanner(root)
 
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("possible credential content", result.stderr)
+        self.assertIn("config.txt:1", result.stderr)
+        self.assertNotIn(key, result.stderr + result.stdout)
 
     def test_claude_skill_links_resolve_to_canonical_skills(self):
         canonical = ROOT / ".agents" / "skills"
