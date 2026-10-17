@@ -37,7 +37,8 @@
 
 # Never publish benchmark payloads, credentials, or local binaries.
 **/secrets.env
-**/.env
+**/.env*
+!**/.env.example
 **/*.credentials.json
 **/auth.json
 **/.benchmark-setup
@@ -50,3 +51,11 @@
 **/*.tar
 **/*.tar.gz
 **/*.zip
+
+# Local scratch and editor files.
+**/.amp/in/
+**/.venv/
+**/.idea/
+**/.vscode/
+**/*.swp
+**/.DS_Store
