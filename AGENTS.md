@@ -1,6 +1,30 @@
 # Repository guidance
 
+## Profile
+- Purpose: Harbor adapter, runner, analyzer and agent skills for controlled Iris versus coding-agent harness benchmarks on Terminal-Bench.
+- Stage: prototype (repository standard 2026-10-17)
+- Gate: `scripts/gate` (CI job `gate`)
+- Landing: direct to main after a green gate; agents land: yes
+- Release: none; agents release: no
+- Outside issues and PRs: agents triage; outside PRs merge: owner approves
+- Deliberate deviations: the Safety rules (no credentials, trial data or binaries in Git; `jobs/` private; fail-safe root allowlist), the onboarding marker before any token spend, sequential contenders with missing telemetry never turned into zero, and the history secret scan before every commit.
+
 This repository contains publishable benchmark tooling, not benchmark data.
+
+## Map
+
+- `run-bench.sh`: runs one Harbor benchmark leg.
+- `agents/iris_installed.py`: Harbor adapter that installs and runs Iris in task containers; supported Harbor range in the README.
+- `analyze_tokens.py`: Markdown and JSON token, cache and cost comparison.
+- `.agents/skills/`: the canonical benchmark skills; `.claude/skills/` links to them.
+- `fixtures/`: synthetic parser fixtures only.
+- `requirements-harbor.txt`: uv lock of the Harbor version CI checks against.
+- `scripts/gate`, `scripts/check-no-secrets.sh`: the gate and its secret scan.
+- `.agents/setup`: orb setup (Python 3.12 `.venv` with the locked Harbor).
+
+## Landing
+
+Commit small Conventional Commits straight to `main`, run `scripts/gate`, and push at the end of every session. Try risky ideas on `spike/<slug>`; merge it, or tag it `archive/<slug>` and delete it. Commit by explicit path. Use the author's GitHub noreply address.
 
 ## Safety
 
@@ -27,6 +51,8 @@ Before committing, run the gate. CI runs the same command in the job `gate`:
 scripts/gate
 ```
 
-It runs the unit tests, `bash -n` on the shell scripts, an import check of the Iris adapter against the locked Harbor, and `./scripts/check-no-secrets.sh --history`. It needs Harbor from `requirements-harbor.txt`; `.agents/setup` installs it in `.venv`, which the gate uses when present.
+It runs the unit tests, `bash -n` on each shell script, an import check of the Iris adapter against the locked Harbor, and `./scripts/check-no-secrets.sh --history`. It needs Harbor from `requirements-harbor.txt`; `.agents/setup` installs it in `.venv`, which the gate uses when present.
+
+Run one test module with `python3 -m unittest test_analyze_tokens -v`, or one test with `python3 -m unittest test_analyze_tokens.TokenAnalyzerTests.test_base_netting`.
 
 Before publishing, inspect `git status`, `git diff --cached`, and the complete tracked path list.
