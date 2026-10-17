@@ -134,7 +134,7 @@ multidict==7.1.0
     # via
     #   aiohttp
     #   yarl
-openai==2.54.0
+openai==3.29.0
     # via litellm
 opentelemetry-api==1.45.1
     # via fastapi
