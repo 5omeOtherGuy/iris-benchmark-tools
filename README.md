@@ -1,6 +1,10 @@
 # Iris Benchmark Tools
 
-Operational entry point for agents running controlled coding-agent benchmarks with Harbor and Terminal-Bench 2.0.
+Portable Harbor tooling for controlled Iris and coding-agent harness benchmarks.
+
+Status: prototype. Commands, telemetry formats and defaults can change without notice; pin a commit if you rely on them.
+
+This README is the operational entry point for agents running controlled coding-agent benchmarks with Harbor and Terminal-Bench 2.0.
 
 ## Start here
 
