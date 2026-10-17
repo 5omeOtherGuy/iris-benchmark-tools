@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Prepare an orb for toolkit work: Python 3.12 venv with the locked Harbor.
+# Idempotent; it never authenticates and never prints credential contents.
+set -euo pipefail
+cd "$(dirname -- "$0")/.."
+
+[[ -x .venv/bin/python ]] || uv venv --quiet --python 3.12 .venv
+uv pip sync --quiet --python .venv/bin/python requirements-harbor.txt
+echo "setup: Harbor $(.venv/bin/python -c 'import importlib.metadata as m; print(m.version("harbor"))') in .venv"
+
+# Benchmarks need these; the gate does not. Report presence only.
+[[ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]] && state=present || state=absent
+echo "setup: CLAUDE_CODE_OAUTH_TOKEN $state"
+for file in ~/.claude/.credentials.json ~/.iris/auth.json ~/.codex/auth.json; do
+  [[ -f "$file" ]] && state=present || state=absent
+  echo "setup: $file $state"
+done

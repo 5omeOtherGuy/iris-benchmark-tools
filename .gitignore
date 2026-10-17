@@ -18,6 +18,7 @@
 !/test_benchmark_onboarding.py
 !/test_repository_security.py
 !/.agents/
+!/.agents/setup
 !/.agents/skills/
 !/.agents/skills/*/
 !/.agents/skills/*/SKILL.md
