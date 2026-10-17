@@ -12,6 +12,10 @@ updates:
     labels: [dependencies]
   - package-ecosystem: pip
     directory: /
+    # requirements-harbor.txt is a uv lock of Harbor; its other pins follow
+    # Harbor's constraints, so only Harbor itself is updated here.
+    allow:
+      - dependency-name: harbor
     schedule:
       interval: weekly
     cooldown:
