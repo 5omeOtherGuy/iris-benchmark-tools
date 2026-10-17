@@ -4,7 +4,10 @@
 set -euo pipefail
 cd "$(dirname -- "$0")/.."
 
-[[ -x .venv/bin/python ]] || uv venv --quiet --python 3.12 .venv
+# Recreate a .venv that is missing or not on Python 3.12.
+if [[ "$(.venv/bin/python -c 'import sys; print(sys.version_info[:2] == (3, 12))' 2>/dev/null)" != True ]]; then
+  uv venv --quiet --clear --python 3.12 .venv
+fi
 uv pip sync --quiet --python .venv/bin/python requirements-harbor.txt
 echo "setup: Harbor $(.venv/bin/python -c 'import importlib.metadata as m; print(m.version("harbor"))') in .venv"
 
