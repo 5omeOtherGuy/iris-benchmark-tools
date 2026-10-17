@@ -32,6 +32,7 @@
 !/.github/
 !/.github/workflows/
 !/.github/workflows/ci.yml
+!/.github/dependabot.yml
 
 # Never publish benchmark payloads, credentials, or local binaries.
 **/secrets.env
