@@ -17,6 +17,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Install Harbor
+        run: python3 -m pip install -r requirements-harbor.txt
+      - name: Import-check the Iris adapter
+        run: >-
+          python3 -c "import tempfile; from pathlib import Path;
+          from agents.iris_installed import Iris;
+          Iris(logs_dir=Path(tempfile.mkdtemp()), model_name='anthropic/claude-sonnet-5')"
       - name: Test
         run: python3 -m unittest -v
       - name: Check shell syntax

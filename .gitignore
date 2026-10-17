@@ -5,6 +5,7 @@
 !/LICENSE
 !/LICENSE-APACHE
 !/README.md
+!/requirements-harbor.txt
 !/SECURITY.md
 !/agents/
 !/agents/iris_installed.py

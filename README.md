@@ -153,6 +153,11 @@ Environment variables override `.benchmark-setup`; the marker overrides defaults
 
 For Claude Code, tell the user to run `claude setup-token` interactively and export the resulting variable. Never ask the user to paste a token into chat.
 
+## Compatibility
+
+- Python 3.12 or newer (Harbor's minimum).
+- Harbor 0.13.1 through 0.24.0. `agents/iris_installed.py` imports and constructs against releases across that range (checked 2026-10-17). CI installs the locked Harbor 0.24.0 and import-checks the adapter without running a trial. To install the same version: `python3 -m pip install -r requirements-harbor.txt`.
+
 ## Repository map
 
 | Path | Use |
@@ -160,6 +165,7 @@ For Claude Code, tell the user to run `claude setup-token` interactively and exp
 | `run-bench.sh` | Run one Harbor benchmark leg. |
 | `agents/iris_installed.py` | Install Iris in Harbor task containers. |
 | `analyze_tokens.py` | Produce Markdown and JSON telemetry comparisons. |
+| `requirements-harbor.txt` | Locked Harbor version that CI checks the adapter against. |
 | `.agents/skills/benchmark-onboarding/` | Configure and preflight a checkout. |
 | `.agents/skills/harness-benchmark/` | Design, run, analyze, and retain a comparison. |
 | `.agents/skills/harness-telemetry/` | Interpret Iris and Claude Code telemetry. |
