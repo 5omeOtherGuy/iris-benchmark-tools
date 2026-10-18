@@ -16,6 +16,20 @@ updates:
     # Harbor's constraints, so only Harbor itself is updated here.
     allow:
       - dependency-name: harbor
+    # Majors that Harbor 0.24.0's dependency graph (litellm, realtime) caps;
+    # declined in PRs #5-#9. Keeps them out if `allow` is ever widened;
+    # revisit when those constraints change.
+    ignore:
+      - dependency-name: filelock
+        update-types: [version-update:semver-major]
+      - dependency-name: huggingface-hub
+        update-types: [version-update:semver-major]
+      - dependency-name: importlib-metadata
+        update-types: [version-update:semver-major]
+      - dependency-name: openai
+        update-types: [version-update:semver-major]
+      - dependency-name: websockets
+        update-types: [version-update:semver-major]
     schedule:
       interval: weekly
     cooldown:
