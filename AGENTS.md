@@ -2,11 +2,12 @@
 
 ## Profile
 - Purpose: Harbor adapter, runner, analyzer and agent skills for controlled Iris versus coding-agent harness benchmarks on Terminal-Bench.
-- Stage: prototype (repository standard 2026-10-17)
+- Stage: prototype (repository standard 2026-10-18)
 - Gate: `scripts/gate` (CI job `gate`)
 - Landing: direct to main after a green gate; agents land: yes
 - Release: none; agents release: no
 - Outside issues and PRs: agents triage; outside PRs merge: owner approves
+- Sensitive paths: `agents/iris_installed.py` and `run-bench.sh` (credential upload and forwarding; public interface), `analyze_tokens.py` (public Markdown and JSON output), `.agents/` (orb setup, onboarding credential inventory, skills), `.claude/skills/`, `AGENTS.md` (`CLAUDE.md` links to it), `.github/`, `scripts/`, `requirements-harbor.txt`, `.gitignore` (fail-safe allowlist), `test_repository_security.py`, `SECURITY.md`, `README.md` (agent run rules and authentication steps)
 - Deliberate deviations: the Safety rules (no credentials, trial data or binaries in Git; `jobs/` private; fail-safe root allowlist), the onboarding marker before any token spend, sequential contenders with missing telemetry never turned into zero, and the history secret scan before every commit.
 
 This repository contains publishable benchmark tooling, not benchmark data.
@@ -24,7 +25,7 @@ This repository contains publishable benchmark tooling, not benchmark data.
 
 ## Landing
 
-Commit small Conventional Commits straight to `main`, run `scripts/gate`, and push at the end of every session. Try risky ideas on `spike/<slug>`; merge it, or tag it `archive/<slug>` and delete it. Commit by explicit path. Use the author's GitHub noreply address.
+Commit small Conventional Commits straight to `main`, run `scripts/gate`, and push at the end of every session. Try risky ideas on `spike/<slug>`; merge it, or tag it `archive/<slug>` and delete it. Commit by explicit path. Use the author's GitHub noreply address. A change to a sensitive path gets an independent review (another agent or the owner) of the diff before it is pushed, with the verdict in the commit body.
 
 ## Safety
 
